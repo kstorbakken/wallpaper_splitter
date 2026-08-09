@@ -21,8 +21,12 @@ Q_OBJECT
 public:
     explicit WallpaperSplitter(QWidget *parent = nullptr);
     ~WallpaperSplitter() override;
-    static QStringList splitImage(const QImage &image, const QString &path, QPoint topLeft = {0, 0}, QPoint bottomRight = {0, 0});
-    static QStringList splitImage(const QImage &image, const QList<QRect> &screens, const QString &path);
+    static QStringList splitImage(const QImage &image, const QString &path,
+                                  QPoint topLeft = {0, 0}, QPoint bottomRight = {0, 0},
+                                  const QString &outputBaseName = "wallpaper");
+    static QStringList splitImage(const QImage &image, const QList<QRect> &screens,
+                                  const QString &path,
+                                  const QString &outputBaseName = "wallpaper");
     void addImage(QImage &image);
     void addImage(const QUrl &url);
 

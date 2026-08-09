@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Qt6 REQUIRED COMPONENTS
         Core
+        DBus
         Gui
         Widgets)
 
@@ -16,19 +17,19 @@ qt_standard_project_setup()
 
 find_package(KF6ConfigWidgets)
 
-qt_add_executable(wallpaper_splitter 
-        src/main.cpp 
-        src/wallpapersplitter.cpp 
-        src/wallpapersplitter.ui 
-        src/screensitem.cpp 
-        src/graphicsview.cpp 
+qt_add_executable(wallpaper_splitter
+        src/main.cpp
+        src/wallpapersplitter.cpp
+        src/wallpapersplitter.ui
+        src/screensitem.cpp
+        src/graphicsview.cpp
 )
 
 target_link_libraries(wallpaper_splitter PRIVATE
         Qt6::Core
+        Qt6::DBus
         Qt6::Gui
         Qt6::Widgets
-        Qt::DBus
         KF6::ConfigWidgets
 )
 

@@ -12,10 +12,6 @@
 #include <QGraphicsView>
 #include "screensitem.h"
 
-bool ScreenComparator(const QScreen *a, const QScreen *b) {
-    return a->geometry().x() < b->geometry().x();
-}
-
 ScreensItem::ScreensItem(QGraphicsItem *parent) : QGraphicsItemGroup(parent) {
     addScreens();
 
@@ -34,13 +30,20 @@ ScreensItem::ScreensItem(QGraphicsItem *parent) : QGraphicsItemGroup(parent) {
 
 void ScreensItem::addScreens() {
     auto screens = QApplication::screens();
+
+    // Keep Qt's screen order consistent with splitImage() and applyWallpaper().
+    // Wallpaper assignment itself uses virtual-desktop geometry because Plasma
+    // may assign different numeric screen indices to the same displays.
+    for (int index = 0; index < screens.size(); ++index) {
+        const QScreen *screen = screens.at(index);
+        qDebug() << "Qt screen" << index << screen->name()
+                 << screen->geometry() << screen->model();
+    }
+
     // get the currently used color scheme
     const auto colorScheme = KColorScheme();
     const auto pen = QPen(colorScheme.foreground(KColorScheme::ForegroundRole::ActiveText), 10);
 
-    // I don't fully understand why this is necessary
-    // most likely this will fail in different configs
-    std::sort(screens.begin(), screens.end(), ScreenComparator);
     // draw a rectangle for every screen
     std::for_each(screens.begin(), screens.end(), [&](const QScreen* screen){
         const auto rect = new QGraphicsRectItem();
