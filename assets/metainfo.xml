@@ -39,6 +39,10 @@
 
     <content_rating type="oars-1.1" />
 
+    <categories>
+        <category>Utility</category>
+    </categories>
+
     <url type="homepage">https://github.com/kstorbakken/wallpaper_splitter</url>
     <url type="bugtracker">https://github.com/kstorbakken/wallpaper_splitter/issues</url>
     <url type="contribute">https://github.com/kstorbakken/wallpaper_splitter/blob/main/CONTRIBUTING.md</url>
