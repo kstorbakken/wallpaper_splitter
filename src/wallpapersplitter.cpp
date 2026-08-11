@@ -11,6 +11,8 @@
 #include <QScreen>
 #include <QDBusMessage>
 #include <QDBusConnection>
+#include <QCryptographicHash>
+#include <QJsonDocument>
 #include <QPushButton>
 #include "wallpapersplitter.h"
 #include "ui_wallpapersplitter.h"
@@ -68,7 +70,8 @@ void WallpaperSplitter::selectImage() {
 /**
  * Splits the selected image and returns a list to all paths where the images were saved.
  */
-QStringList WallpaperSplitter::splitImage(const QImage &image, const QList<QRect> &screens, const QString &path) {
+QStringList WallpaperSplitter::splitImage(const QImage &image, const QList<QRect> &screens,
+                                          const QString &path, const QString &outputBaseName) {
     if (screens.isEmpty()) {
         qFatal("No area to cut out provided!");
     }
@@ -76,25 +79,59 @@ QStringList WallpaperSplitter::splitImage(const QImage &image, const QList<QRect
         qFatal("Image could not be loaded");
     }
 
+    QRect cropBounds;
+    for (const QRect &screen : screens) {
+        cropBounds = cropBounds.isNull() ? screen : cropBounds.united(screen);
+    }
+    if (cropBounds.width() > image.width() || cropBounds.height() > image.height()) {
+        qFatal("Combined crop area is larger than the source image");
+    }
+
+    QPoint correction;
+    if (cropBounds.left() < image.rect().left()) {
+        correction.setX(image.rect().left() - cropBounds.left());
+    } else if (cropBounds.right() > image.rect().right()) {
+        correction.setX(image.rect().right() - cropBounds.right());
+    }
+    if (cropBounds.top() < image.rect().top()) {
+        correction.setY(image.rect().top() - cropBounds.top());
+    } else if (cropBounds.bottom() > image.rect().bottom()) {
+        correction.setY(image.rect().bottom() - cropBounds.bottom());
+    }
+    if (!correction.isNull()) {
+        qWarning() << "Moving crop layout by" << correction
+                   << "to fit source" << image.rect();
+    }
+
+    const QString safeBaseName = QFileInfo(outputBaseName).completeBaseName();
+
     QImage wallpaper;
     QString fileName;
     QStringList paths{};
-    QDir().mkdir(path);
+    QDir().mkpath(path);
     int index = 0;
 
-    std::for_each(screens.begin(), screens.end(), [&](const QRect screen){
-        if (!image.rect().contains(screen.topLeft())) {
-            qWarning("Image does not contain the top left corner of the provided rectangle!");
-        }
-        if (!image.rect().contains(screen.bottomRight())) {
-            qWarning("Image does not contain the bottom right position of the provided rectangle!");
+    std::for_each(screens.begin(), screens.end(), [&](QRect screen){
+        screen.translate(correction);
+        qDebug() << "Cropping" << screen << "from source" << image.rect();
+        if (!image.rect().contains(screen)) {
+            qFatal("Crop rectangle is outside the source image");
         }
 
         // copy a rectangle with size and position of the screen
         wallpaper = image.copy(screen);
+        qDebug() << "Generated crop" << index << wallpaper.size();
 
-        // images are saved as 0.png 1.png etc
-        fileName = path + '/' + QString::number(index) + ".png";
+        const QByteArrayView pixels(
+                reinterpret_cast<const char *>(wallpaper.constBits()),
+                wallpaper.sizeInBytes());
+        const QString digest = QString::fromLatin1(
+                QCryptographicHash::hash(pixels, QCryptographicHash::Sha256)
+                        .toHex().left(16));
+        // Keep all output in the selected directory. The crop-content digest
+        // makes Plasma reload changed pixels even if the source name is reused.
+        fileName = path + '/' + safeBaseName + '-'
+                + QString::number(index + 1) + '-' + digest + ".png";
         paths.append(fileName);
 
         // if this returns false, the save failed and the assertion fails
@@ -106,7 +143,9 @@ QStringList WallpaperSplitter::splitImage(const QImage &image, const QList<QRect
     return paths;
 }
 
-QStringList WallpaperSplitter::splitImage(const QImage &image, const QString &path, const QPoint topLeft, const QPoint bottomRight) {
+QStringList WallpaperSplitter::splitImage(const QImage &image, const QString &path,
+                                          const QPoint topLeft, const QPoint bottomRight,
+                                          const QString &outputBaseName) {
     QList<QRect> screenGeometries{};
     const auto screens = QApplication::screens();
     std::for_each(screens.begin(), screens.end(), [&](const QScreen* screen){
@@ -121,7 +160,7 @@ QStringList WallpaperSplitter::splitImage(const QImage &image, const QString &pa
         screenGeometries.append(geometry);
     });
 
-    return splitImage(image, screenGeometries, path);
+    return splitImage(image, screenGeometries, path, outputBaseName);
 }
 
 QStringList WallpaperSplitter::splitImage() {
@@ -145,7 +184,8 @@ QStringList WallpaperSplitter::splitImage() {
     }
 
     unsetCursor();
-    return WallpaperSplitter::splitImage(*wallpaper, screens, path);
+    return WallpaperSplitter::splitImage(
+            *wallpaper, screens, path, imageFile->completeBaseName());
 }
 
 /**
@@ -155,34 +195,71 @@ void WallpaperSplitter::applyWallpaper() {
     auto paths = splitImage();
     assert(!paths.isEmpty());
 
-    // apply the wallpapers via a dbus call
+    const auto screens = QApplication::screens();
+    assert(paths.size() == screens.size());
+
+    // Qt and Plasma can assign different numeric indices to the same physical
+    // screen. Pass each crop's virtual-desktop geometry so Plasma can match it
+    // to the containment's screenGeometry() without relying on index order.
+    QVariantList crops;
+    for (int index = 0; index < paths.size(); ++index) {
+        const QRect geometry = screens.at(index)->geometry();
+        crops.append(QVariantMap{
+                {"path", paths.at(index)},
+                {"x", geometry.x()},
+                {"y", geometry.y()},
+                {"width", geometry.width()},
+                {"height", geometry.height()}
+        });
+    }
+    const QString cropArray = QString::fromUtf8(
+            QJsonDocument::fromVariant(crops).toJson(QJsonDocument::Compact));
+    const QString script = QStringLiteral(R"(
+const crops = %1;
+function sameGeometry(crop, geometry) {
+    return crop.x === geometry.x && crop.y === geometry.y
+        && crop.width === geometry.width && crop.height === geometry.height;
+}
+function describeGeometry(geometry) {
+    return geometry.x + ',' + geometry.y + ' '
+        + geometry.width + 'x' + geometry.height;
+}
+for (const desktop of desktopsForActivity(currentActivity())) {
+    if (desktop.screen < 0) {
+        print('Skipping desktop ' + desktop.id + ' screen=' + desktop.screen);
+        continue;
+    }
+
+    const geometry = screenGeometry(desktop.screen);
+    const crop = crops.find(candidate => sameGeometry(candidate, geometry));
+    if (crop === undefined) {
+        print('No crop for desktop ' + desktop.id + ' screen=' + desktop.screen
+              + ' geometry=' + describeGeometry(geometry));
+        continue;
+    }
+
+    print('Desktop ' + desktop.id + ' screen=' + desktop.screen
+          + ' geometry=' + describeGeometry(geometry) + ' path=' + crop.path);
+    desktop.wallpaperPlugin = 'org.kde.image';
+    desktop.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
+    desktop.writeConfig('Image', crop.path);
+}
+)").arg(cropArray);
+
     auto message = QDBusMessage::createMethodCall(
             "org.kde.plasmashell",
             "/PlasmaShell", "org.kde.PlasmaShell",
-            "setWallpaper");
+            "evaluateScript");
+    message.setArguments(QVariantList() << script);
 
-    for (int i = 0; i < paths.size(); i++) {
-        QVariantList arguments;
-
-        // wallpaper plugin
-        arguments << QVariant(QString("org.kde.image"));
-
-        // parameters
-        QVariantMap params;
-        params.insert(QString("Image"), QVariant(paths.first()));
-        arguments << params;
-
-        // screenNum
-        arguments << QVariant((uint) i);
-
-        message.setArguments(arguments);
-
-        qDebug() << "Applying image" << paths.join(", ");
-        auto reply = QDBusConnection::sessionBus().call(message);
-        if(reply.type() == QDBusMessage::ErrorMessage) {
-            qCritical() << "Something went wrong.";
-            qCritical() << reply.errorMessage();
-        }
+    qDebug() << "Applying crops by virtual-desktop geometry:" << crops;
+    const auto reply = QDBusConnection::sessionBus().call(message);
+    if(reply.type() == QDBusMessage::ErrorMessage) {
+        qCritical() << "Something went wrong.";
+        qCritical() << reply.errorMessage();
+    } else if (!reply.arguments().isEmpty()) {
+        qDebug().noquote() << "Plasma assignment:\n"
+                           << reply.arguments().constFirst().toString();
     }
 
     QApplication::quit();
@@ -252,7 +329,11 @@ void WallpaperSplitter::addImage(QImage &image) {
         screenGroup->setPos(imageItem->scenePos());
     }
 
-    screenGroup->setPos(imageItem->boundingRect().center());
+    // Screen rectangles use virtual-desktop coordinates and may have a non-zero
+    // or negative origin. Position the group's bounding-rectangle center on the
+    // image center instead of adding the image center as an offset.
+    screenGroup->setPos(imageItem->boundingRect().center()
+                        - screenGroup->boundingRect().center());
 
     scaleView();
 }

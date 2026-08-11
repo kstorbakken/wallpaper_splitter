@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Qt6 REQUIRED COMPONENTS
         Core
+        DBus
         Gui
         Widgets)
 
@@ -16,19 +17,19 @@ qt_standard_project_setup()
 
 find_package(KF6ConfigWidgets)
 
-qt_add_executable(wallpaper_splitter 
-        src/main.cpp 
-        src/wallpapersplitter.cpp 
-        src/wallpapersplitter.ui 
-        src/screensitem.cpp 
-        src/graphicsview.cpp 
+qt_add_executable(wallpaper_splitter
+        src/main.cpp
+        src/wallpapersplitter.cpp
+        src/wallpapersplitter.ui
+        src/screensitem.cpp
+        src/graphicsview.cpp
 )
 
 target_link_libraries(wallpaper_splitter PRIVATE
         Qt6::Core
+        Qt6::DBus
         Qt6::Gui
         Qt6::Widgets
-        Qt::DBus
         KF6::ConfigWidgets
 )
 
@@ -46,3 +47,26 @@ install(FILES assets/metainfo.xml
 install(FILES assets/wallpaper_splitter.desktop
     DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
     RENAME io.github.l0drex.wallpaper_splitter.desktop)
+
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+
+    qt_add_executable(splitimage_test
+            tests/splitimage_test.cpp
+            src/wallpapersplitter.cpp
+            src/wallpapersplitter.ui
+            src/screensitem.cpp
+            src/graphicsview.cpp)
+    target_include_directories(splitimage_test PRIVATE src)
+    target_link_libraries(splitimage_test PRIVATE
+            Qt6::Core
+            Qt6::DBus
+            Qt6::Gui
+            Qt6::Test
+            Qt6::Widgets
+            KF6::ConfigWidgets)
+    add_test(NAME splitimage_test COMMAND splitimage_test)
+    set_tests_properties(splitimage_test PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()

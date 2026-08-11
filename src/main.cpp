@@ -66,7 +66,8 @@ int main(int argc, char *argv[]) {
         if (path.isEmpty()) {
             path = imageFile->absolutePath() + '/' + imageFile->baseName() + "_split";
         }
-        filePaths = WallpaperSplitter::splitImage(*image, path, topLeft, bottomRight);
+        filePaths = WallpaperSplitter::splitImage(
+                *image, path, topLeft, bottomRight, imageFile->completeBaseName());
 
         std::for_each(filePaths.begin(), filePaths.end(), [&](const QString& item){
             std::cout << item.toStdString() << std::endl;
