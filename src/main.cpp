@@ -26,6 +26,8 @@ int main(int argc, char *argv[]) {
     // parts of this source code where taken from here: https://doc.qt.io/qt-5/qapplication.html
     QApplication app(argc, argv);
     QApplication::setApplicationName("Wallpaper Splitter");
+    QApplication::setApplicationVersion(WALLPAPER_SPLITTER_VERSION);
+    QApplication::setDesktopFileName(WALLPAPER_SPLITTER_APP_ID);
 
     if (argc <= 1) {
         // start GUI
@@ -39,6 +41,7 @@ int main(int argc, char *argv[]) {
         parser.setApplicationDescription(
                 QCoreApplication::translate("main","Splits your favorite wallpaper image so you can apply it across all of your screens."));
         parser.addHelpOption();
+        parser.addVersionOption();
         parser.addPositionalArgument("input",
                                      QCoreApplication::translate("main", "Image to split."));
 

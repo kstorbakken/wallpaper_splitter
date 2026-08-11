@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container: debian:trixie-slim
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            appstream \
+            build-essential \
+            ca-certificates \
+            cmake \
+            desktop-file-utils \
+            extra-cmake-modules \
+            git \
+            libkf6configwidgets-dev \
+            qt6-base-dev
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Validate application metadata
+        run: |
+          appstreamcli validate --no-net assets/metainfo.xml
+          desktop-file-validate assets/wallpaper_splitter.desktop

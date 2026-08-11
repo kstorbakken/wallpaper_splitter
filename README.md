@@ -1,5 +1,12 @@
 # Wallpaper Splitter
 
+[![CI](https://github.com/kstorbakken/wallpaper_splitter/actions/workflows/ci.yml/badge.svg)](https://github.com/kstorbakken/wallpaper_splitter/actions/workflows/ci.yml)
+
+> [!NOTE]
+> This is the actively maintained fork of the original
+> [Wallpaper Splitter](https://github.com/l0drex/wallpaper_splitter) project.
+> Development, issues, and releases continue in this repository.
+
 On KDE it is not possible to apply an image so that it spans across all of your screens.
 This tool fixes that by splitting your image according to your screen setup.
 It can also directly apply the image as your wallpaper.
@@ -10,7 +17,8 @@ Keep in mind that this only works with images, not with any fancy wallpaper engi
 
 ## 🚀 Features and roadmap
 
-This is only an overview. For a more in-depth look see the project tab. 
+This is an overview of the currently supported functionality.
+
 - [x] Split a given image
 - [x] Apply the wallpaper from within the application
 - [x] Adjust position
@@ -31,17 +39,42 @@ _Some of these features might not be implemented yet._
 3. Save the images that will be your wallpaper by clicking <kbd>💾 Save</kbd> or
    apply them directly by clicking <kbd>✔️ Ok</kbd>.
 
-Note that the buttons in the screenshot are labeled in german since that is my system language.
+Note that the buttons in the screenshot are labeled in German.
 
 
 ## ⚙️ How does it work
 
-Opening and splitting the image is pretty straight forward.
+Opening and splitting the image is straightforward.
 Applying the image is done via a dbus call to the Plasma Shell,
 for more on that see their documentation provided [here](https://develop.kde.org/docs/plasma/scripting/api/).
 
 
+## 🛠️ Build and test
+
+Wallpaper Splitter requires a C++20 compiler, CMake 3.20 or newer, Qt 6, and
+KDE Frameworks 6 ConfigWidgets.
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+To install it after building:
+
+```sh
+cmake --install build
+```
+
+
 ## 💡 How to help
 
-If you want to help out, create an issue or pull request and I will have a look at it.
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for the development workflow.
 If you are able to implement these features directly into plasma, I would love to see that!
+
+
+## License and authors
+
+Wallpaper Splitter is licensed under the [GNU GPL v3](LICENSE). See
+[AUTHORS.md](AUTHORS.md) for project authorship and maintenance history.

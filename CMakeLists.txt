@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
-project(wallpaper_splitter VERSION 1.1.1 LANGUAGES CXX)
+project(wallpaper_splitter VERSION 1.1.4 LANGUAGES CXX)
+
+include(GNUInstallDirs)
+
+set(WALLPAPER_SPLITTER_APP_ID "io.github.kstorbakken.wallpaper_splitter")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,7 +19,7 @@ find_package(Qt6 REQUIRED COMPONENTS
 
 qt_standard_project_setup()
 
-find_package(KF6ConfigWidgets)
+find_package(KF6ConfigWidgets REQUIRED)
 
 qt_add_executable(wallpaper_splitter
         src/main.cpp
@@ -33,20 +37,24 @@ target_link_libraries(wallpaper_splitter PRIVATE
         KF6::ConfigWidgets
 )
 
+target_compile_definitions(wallpaper_splitter PRIVATE
+        WALLPAPER_SPLITTER_APP_ID="${WALLPAPER_SPLITTER_APP_ID}"
+        WALLPAPER_SPLITTER_VERSION="${PROJECT_VERSION}")
+
 install(TARGETS wallpaper_splitter RUNTIME DESTINATION bin)
 
 # Install metadata
 install(FILES assets/icon.svg
     DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
-    RENAME io.github.l0drex.wallpaper_splitter.svg)
+    RENAME ${WALLPAPER_SPLITTER_APP_ID}.svg)
 
 install(FILES assets/metainfo.xml
     DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo
-    RENAME io.github.l0drex.wallpaper_splitter.metainfo.xml)
+    RENAME ${WALLPAPER_SPLITTER_APP_ID}.metainfo.xml)
 
 install(FILES assets/wallpaper_splitter.desktop
     DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
-    RENAME io.github.l0drex.wallpaper_splitter.desktop)
+    RENAME ${WALLPAPER_SPLITTER_APP_ID}.desktop)
 
 include(CTest)
 if(BUILD_TESTING)
