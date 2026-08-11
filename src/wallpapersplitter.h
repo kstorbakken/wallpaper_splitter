@@ -10,6 +10,8 @@
 #include <QGraphicsItemGroup>
 #include "screensitem.h"
 
+class ResizableImageItem;
+
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class WallpaperSplitter; }
@@ -33,8 +35,8 @@ public:
 private:
     Ui::WallpaperSplitter *ui;
     ScreensItem *screenGroup{};
+    ResizableImageItem *imageItem{};
     QFileInfo *imageFile;
-    QImage *wallpaper;
 
     void scaleView();
     QStringList splitImage();

@@ -18,6 +18,7 @@
 #include "ui_wallpapersplitter.h"
 #include "screensitem.h"
 #include "graphicsview.h"
+#include "resizableimageitem.h"
 
 
 WallpaperSplitter::WallpaperSplitter(QWidget *parent) :
@@ -169,7 +170,7 @@ QStringList WallpaperSplitter::splitImage() {
     QList<QRect> screens = {};
     const auto screenItems = screenGroup->getRectangles();
     std::for_each(screenItems.begin(), screenItems.end(), [&](const QGraphicsRectItem *screen){
-        screens.append(screenGroup->sceneTransform().mapRect(screen->rect().toRect()));
+        screens.append(screenGroup->mapRectToParent(screen->rect()).toAlignedRect());
     });
 
     QString path;
@@ -185,7 +186,7 @@ QStringList WallpaperSplitter::splitImage() {
 
     unsetCursor();
     return WallpaperSplitter::splitImage(
-            *wallpaper, screens, path, imageFile->completeBaseName());
+            imageItem->image(), screens, path, imageFile->completeBaseName());
 }
 
 /**
@@ -293,17 +294,25 @@ void WallpaperSplitter::resizeEvent(QResizeEvent *event) {
 }
 
 void WallpaperSplitter::scaleView() {
-    ui->graphicsView->fitInView(ui->graphicsView->scene()->itemsBoundingRect(), Qt::AspectRatioMode::KeepAspectRatio);
-
-    // center the first element
     auto scene = ui->graphicsView->scene();
-    if (scene != nullptr) {
-        auto items = scene->items();
-        if (items.size() > 0) {
-            auto first = items.last();
-            ui->graphicsView->centerOn(first);
-        }
+    if (scene == nullptr || scene->items().isEmpty()) return;
+
+    // Keep fitInView from toggling automatic scrollbars while handling a
+    // resize. That can recursively change the viewport and leave the fitted
+    // scene clipped at particular window and image aspect ratios.
+    ui->graphicsView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    ui->graphicsView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    if (imageItem == nullptr) {
+        // The empty-state label ignores view transforms so it stays legible.
+        // Scaling its scene bounds would move it as the viewport changes.
+        ui->graphicsView->resetTransform();
+        ui->graphicsView->centerOn(scene->itemsBoundingRect().center());
+        return;
     }
+
+    ui->graphicsView->fitInView(scene->itemsBoundingRect(), Qt::KeepAspectRatio);
+    ui->graphicsView->centerOn(imageItem);
 }
 
 WallpaperSplitter::~WallpaperSplitter() {
@@ -313,11 +322,11 @@ WallpaperSplitter::~WallpaperSplitter() {
 void WallpaperSplitter::addImage(QImage &image) {
     ui->graphicsView->scene()->clear();
 
-    wallpaper = new QImage(image);
-    auto imageItem = ui->graphicsView->scene()->addPixmap(QPixmap::fromImage(image));
-    imageItem->setFlag(QGraphicsItem::ItemContainsChildrenInShape);
+    imageItem = new ResizableImageItem(image);
+    ui->graphicsView->scene()->addItem(imageItem);
 
     screenGroup = new ScreensItem(imageItem);
+    imageItem->setScreenGroup(screenGroup);
 
     // scale the desktops so that the image fits
     const auto screenSize = totalScreenSize();
