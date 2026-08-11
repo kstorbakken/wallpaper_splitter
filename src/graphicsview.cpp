@@ -13,6 +13,12 @@
 GraphicsView::GraphicsView(WallpaperSplitter *parent) : QGraphicsView(parent) {
     this->parent = parent;
     setAcceptDrops(true);
+    // WallpaperSplitter automatically fits the complete preview whenever the
+    // window changes size. Automatic scrollbars can make fitInView recurse:
+    // showing one scrollbar shrinks the viewport enough to require the other,
+    // leaving the image clipped until the next resize event.
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     // Resize handles ignore the view transform so they stay easy to grab. Some
     // compositors do not invalidate their old viewport positions reliably;
     // repainting this small preview avoids visible handle trails while dragging.
@@ -21,6 +27,10 @@ GraphicsView::GraphicsView(WallpaperSplitter *parent) : QGraphicsView(parent) {
 
 void GraphicsView::wheelEvent(QWheelEvent *event) {
     if (QGuiApplication::keyboardModifiers() == Qt::ControlModifier) {
+        // Manual zooming is the one case where scrollbars are useful. The next
+        // window resize restores the automatically fitted, scrollbar-free view.
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
         // 1 if zooming in, -1 if zooming out
         const auto scaleUp = 2*(event->angleDelta().y() < 0) - 1;
         const auto amount = 1 - ZOOM_AMOUNT * scaleUp;

@@ -297,6 +297,12 @@ void WallpaperSplitter::scaleView() {
     auto scene = ui->graphicsView->scene();
     if (scene == nullptr || scene->items().isEmpty()) return;
 
+    // Keep fitInView from toggling automatic scrollbars while handling a
+    // resize. That can recursively change the viewport and leave the fitted
+    // scene clipped at particular window and image aspect ratios.
+    ui->graphicsView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    ui->graphicsView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
     if (imageItem == nullptr) {
         // The empty-state label ignores view transforms so it stays legible.
         // Scaling its scene bounds would move it as the viewport changes.

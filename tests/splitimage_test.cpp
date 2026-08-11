@@ -4,6 +4,7 @@
 #include <QGraphicsView>
 #include <QImage>
 #include <QGraphicsScene>
+#include <QScrollBar>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -24,6 +25,7 @@ private slots:
     void resizeCannotExposeMonitorLayout();
     void screenControlsAcceptMoveAndScaleButtons();
     void emptyStateRemainsCenteredWhenWindowResizes();
+    void imageRemainsFullyVisibleAcrossWindowResizes();
 };
 
 void SplitImageTest::preservesRectangleOrderAndPixels() {
@@ -213,6 +215,41 @@ void SplitImageTest::emptyStateRemainsCenteredWhenWindowResizes() {
     const QPoint viewportCenter = view->viewport()->rect().center();
     QVERIFY(qAbs(labelCenter.x() - viewportCenter.x()) <= 1);
     QVERIFY(qAbs(labelCenter.y() - viewportCenter.y()) <= 1);
+}
+
+void SplitImageTest::imageRemainsFullyVisibleAcrossWindowResizes() {
+    WallpaperSplitter splitter;
+    QImage image(1920, 1200, QImage::Format_RGB32);
+    image.fill(Qt::black);
+    splitter.addImage(image);
+    splitter.show();
+
+    auto *view = splitter.findChild<QGraphicsView *>();
+    QVERIFY(view != nullptr);
+
+    const QList<QSize> windowSizes{
+            QSize(420, 340), QSize(530, 417), QSize(650, 480), QSize(900, 650)};
+    for (const QSize &windowSize : windowSizes) {
+        splitter.resize(windowSize);
+        QApplication::processEvents();
+
+        QVERIFY(!view->horizontalScrollBar()->isVisible());
+        QVERIFY(!view->verticalScrollBar()->isVisible());
+
+        const QRect mappedSceneBounds =
+                view->mapFromScene(view->scene()->itemsBoundingRect()).boundingRect();
+        const QRect viewportBounds = view->viewport()->rect().adjusted(-1, -1, 1, 1);
+        QVERIFY2(viewportBounds.contains(mappedSceneBounds),
+                 qPrintable(QStringLiteral("Scene %1,%2 %3x%4 is outside viewport %5x%6 at window %7x%8")
+                                    .arg(mappedSceneBounds.x())
+                                    .arg(mappedSceneBounds.y())
+                                    .arg(mappedSceneBounds.width())
+                                    .arg(mappedSceneBounds.height())
+                                    .arg(view->viewport()->width())
+                                    .arg(view->viewport()->height())
+                                    .arg(windowSize.width())
+                                    .arg(windowSize.height())));
+    }
 }
 
 QTEST_MAIN(SplitImageTest)
