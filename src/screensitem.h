@@ -15,6 +15,7 @@ public:
     explicit ScreensItem(QGraphicsItem *parent);
 
     const QList<QGraphicsRectItem *> &getRectangles() const;
+    void constrainToParent();
 
 private:
     ScalingMode scalingMode = ScalingMode::none;
@@ -22,6 +23,8 @@ private:
     qreal maxScale;
 
     void addScreens();
+    void updateMaximumScale();
+    QPointF constrainedPosition(const QPointF &position) const;
 
 protected:
     void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override;

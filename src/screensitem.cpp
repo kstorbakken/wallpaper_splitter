@@ -16,16 +16,12 @@ ScreensItem::ScreensItem(QGraphicsItem *parent) : QGraphicsItemGroup(parent) {
     addScreens();
 
     // make the screen item movable by the user
-    setAcceptedMouseButtons(Qt::LeftButton);
-    setAcceptedMouseButtons(Qt::RightButton);
+    setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton);
     setFlag(ItemIsMovable);
     setFlag(ItemSendsGeometryChanges);
     setTransformOriginPoint(boundingRect().center());
 
-    // calculate maximum scale
-    qreal maxScaleWidth = parentItem()->boundingRect().width() / childrenBoundingRect().width();
-    qreal maxScaleHeight = parentItem()->boundingRect().height() / childrenBoundingRect().height();
-    maxScale = std::min(maxScaleHeight, maxScaleWidth);
+    updateMaximumScale();
 }
 
 void ScreensItem::addScreens() {
@@ -68,6 +64,30 @@ void ScreensItem::addScreens() {
 
 const QList<QGraphicsRectItem *> &ScreensItem::getRectangles() const {
     return rectangles;
+}
+
+void ScreensItem::updateMaximumScale() {
+    const QRectF screens = childrenBoundingRect();
+    const QRectF image = parentItem()->boundingRect();
+    maxScale = qMin(image.width() / screens.width(), image.height() / screens.height());
+}
+
+QPointF ScreensItem::constrainedPosition(const QPointF &position) const {
+    QRectF screens = mapRectToParent(boundingRect());
+    screens.translate(position - pos());
+    const QRectF image = parentItem()->boundingRect();
+    QPointF correction;
+    if (screens.left() < image.left()) correction.setX(image.left() - screens.left());
+    else if (screens.right() > image.right()) correction.setX(image.right() - screens.right());
+    if (screens.top() < image.top()) correction.setY(image.top() - screens.top());
+    else if (screens.bottom() > image.bottom()) correction.setY(image.bottom() - screens.bottom());
+    return position + correction;
+}
+
+void ScreensItem::constrainToParent() {
+    updateMaximumScale();
+    if (scale() > maxScale) setScale(maxScale);
+    setPos(constrainedPosition(pos()));
 }
 
 void ScreensItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
@@ -127,6 +147,7 @@ void ScreensItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event) {
                 return;
         }
         setScale(scale() * (1 - newScale));
+        constrainToParent();
         event->accept();
     }
     QGraphicsItem::mouseMoveEvent(event);
@@ -142,25 +163,13 @@ void ScreensItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *event) {
 QVariant ScreensItem::itemChange(QGraphicsItem::GraphicsItemChange change, const QVariant &value) {
     switch (change) {
         case QGraphicsItem::ItemPositionChange: {
-            // Because of the changed transformation origin, there is a difference between the top left point
-            // of the item and the position. The difference is this delta vector.
-            const QPointF delta = sceneBoundingRect().topLeft() - pos();
-            QPointF newTopLeft = value.toPointF()  + delta;
-            const QPointF newBottomRight = newTopLeft + sceneBoundingRect().bottomRight() + QPoint(1, 1);
-            QRectF rect = parentItem()->sceneBoundingRect();
-
-            if(!rect.contains(newTopLeft) || !rect.contains(newBottomRight)) {
-                newTopLeft.setX(qBound(rect.left(), newTopLeft.x(), rect.right() + 1 - sceneBoundingRect().width()));
-                newTopLeft.setY(qBound(rect.top(), newTopLeft.y(), rect.bottom() + 1 - sceneBoundingRect().height()));
-                return newTopLeft - delta;
-            }
-            break;
+            return constrainedPosition(value.toPointF());
         }
         case QGraphicsItem::ItemScaleChange: {
+            updateMaximumScale();
             qreal newScale = value.toDouble();
             if(newScale > maxScale) return maxScale;
             if(newScale < 0.1) return 0.1;
-            setPos(itemChange(ItemPositionChange, pos()).toPointF());
             break;
         }
     }

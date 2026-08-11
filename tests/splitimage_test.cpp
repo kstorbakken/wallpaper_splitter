@@ -1,9 +1,12 @@
 #include <QColor>
 #include <QDir>
 #include <QImage>
+#include <QGraphicsScene>
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "resizableimageitem.h"
+#include "screensitem.h"
 #include "wallpapersplitter.h"
 
 class SplitImageTest : public QObject {
@@ -13,6 +16,11 @@ private slots:
     void preservesRectangleOrderAndPixels();
     void changesPathsWhenCropContentChanges();
     void movesTranslatedLayoutInsideSource();
+    void resizeStretchesAndKeepsOppositeCorner();
+    void resizeKeepsAspectRatioWithShift();
+    void resizeStopsAtOppositeCorner();
+    void resizeCannotExposeMonitorLayout();
+    void screenControlsAcceptMoveAndScaleButtons();
 };
 
 void SplitImageTest::preservesRectangleOrderAndPixels() {
@@ -110,6 +118,78 @@ void SplitImageTest::movesTranslatedLayoutInsideSource() {
         QCOMPARE(crop.size(), QSize(10, 10));
         QCOMPARE(crop.pixelColor(5, 5), expected.at(index));
     }
+}
+
+void SplitImageTest::resizeStretchesAndKeepsOppositeCorner() {
+    QImage source(100, 50, QImage::Format_RGB32);
+    source.fill(Qt::red);
+    QGraphicsScene scene;
+    auto *image = new ResizableImageItem(source);
+    scene.addItem(image);
+
+    const QPointF fixedCorner = image->mapToScene(image->boundingRect().bottomRight());
+    image->beginResize(ResizableImageItem::Corner::TopLeft);
+    image->resizeTo(QPointF(-100, -25));
+
+    QCOMPARE(image->image().size(), QSize(200, 75));
+    QCOMPARE(image->mapToScene(image->boundingRect().bottomRight()), fixedCorner);
+}
+
+void SplitImageTest::resizeKeepsAspectRatioWithShift() {
+    QImage source(100, 50, QImage::Format_RGB32);
+    source.fill(Qt::red);
+    QGraphicsScene scene;
+    auto *image = new ResizableImageItem(source);
+    scene.addItem(image);
+
+    image->beginResize(ResizableImageItem::Corner::TopLeft);
+    image->resizeTo(QPointF(-100, -25), true);
+
+    QCOMPARE(image->image().size(), QSize(200, 100));
+}
+
+void SplitImageTest::resizeStopsAtOppositeCorner() {
+    QImage source(100, 50, QImage::Format_RGB32);
+    source.fill(Qt::red);
+    QGraphicsScene scene;
+    auto *image = new ResizableImageItem(source);
+    scene.addItem(image);
+
+    const QPointF fixedCorner = image->mapToScene(image->boundingRect().bottomRight());
+    image->beginResize(ResizableImageItem::Corner::TopLeft);
+    image->resizeTo(fixedCorner + QPointF(50, 25));
+
+    QCOMPARE(image->image().size(), QSize(1, 1));
+    QCOMPARE(image->mapToScene(image->boundingRect().bottomRight()), fixedCorner);
+}
+
+void SplitImageTest::resizeCannotExposeMonitorLayout() {
+    QImage source(100, 50, QImage::Format_RGB32);
+    source.fill(Qt::red);
+    QGraphicsScene scene;
+    auto *image = new ResizableImageItem(source);
+    scene.addItem(image);
+    auto *screens = new ScreensItem(image);
+    image->setScreenGroup(screens);
+
+    const QSize requiredSize = screens->mapRectToParent(screens->boundingRect()).size().toSize();
+    image->beginResize(ResizableImageItem::Corner::TopLeft);
+    image->resizeTo(image->mapToScene(image->boundingRect().bottomRight()));
+
+    QVERIFY(image->image().width() >= requiredSize.width());
+    QVERIFY(image->image().height() >= requiredSize.height());
+    QVERIFY(image->boundingRect().contains(screens->mapRectToParent(screens->boundingRect())));
+}
+
+void SplitImageTest::screenControlsAcceptMoveAndScaleButtons() {
+    QImage source(100, 50, QImage::Format_RGB32);
+    QGraphicsScene scene;
+    auto *image = new ResizableImageItem(source);
+    scene.addItem(image);
+    auto *screens = new ScreensItem(image);
+
+    QVERIFY(screens->acceptedMouseButtons().testFlag(Qt::LeftButton));
+    QVERIFY(screens->acceptedMouseButtons().testFlag(Qt::RightButton));
 }
 
 QTEST_MAIN(SplitImageTest)

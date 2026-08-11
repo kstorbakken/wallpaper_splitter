@@ -18,6 +18,7 @@
 #include "ui_wallpapersplitter.h"
 #include "screensitem.h"
 #include "graphicsview.h"
+#include "resizableimageitem.h"
 
 
 WallpaperSplitter::WallpaperSplitter(QWidget *parent) :
@@ -169,7 +170,7 @@ QStringList WallpaperSplitter::splitImage() {
     QList<QRect> screens = {};
     const auto screenItems = screenGroup->getRectangles();
     std::for_each(screenItems.begin(), screenItems.end(), [&](const QGraphicsRectItem *screen){
-        screens.append(screenGroup->sceneTransform().mapRect(screen->rect().toRect()));
+        screens.append(screenGroup->mapRectToParent(screen->rect()).toAlignedRect());
     });
 
     QString path;
@@ -185,7 +186,7 @@ QStringList WallpaperSplitter::splitImage() {
 
     unsetCursor();
     return WallpaperSplitter::splitImage(
-            *wallpaper, screens, path, imageFile->completeBaseName());
+            imageItem->image(), screens, path, imageFile->completeBaseName());
 }
 
 /**
@@ -313,11 +314,11 @@ WallpaperSplitter::~WallpaperSplitter() {
 void WallpaperSplitter::addImage(QImage &image) {
     ui->graphicsView->scene()->clear();
 
-    wallpaper = new QImage(image);
-    auto imageItem = ui->graphicsView->scene()->addPixmap(QPixmap::fromImage(image));
-    imageItem->setFlag(QGraphicsItem::ItemContainsChildrenInShape);
+    imageItem = new ResizableImageItem(image);
+    ui->graphicsView->scene()->addItem(imageItem);
 
     screenGroup = new ScreensItem(imageItem);
+    imageItem->setScreenGroup(screenGroup);
 
     // scale the desktops so that the image fits
     const auto screenSize = totalScreenSize();

@@ -13,6 +13,10 @@
 GraphicsView::GraphicsView(WallpaperSplitter *parent) : QGraphicsView(parent) {
     this->parent = parent;
     setAcceptDrops(true);
+    // Resize handles ignore the view transform so they stay easy to grab. Some
+    // compositors do not invalidate their old viewport positions reliably;
+    // repainting this small preview avoids visible handle trails while dragging.
+    setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
 }
 
 void GraphicsView::wheelEvent(QWheelEvent *event) {

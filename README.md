@@ -34,7 +34,7 @@ This is an overview of the currently supported functionality.
 _Some of these features might not be implemented yet._
 
 1. Click <kbd>📂 Open</kbd> to select your image.
-2. Adjust the position of your screens with <kbd>Left 🖱️</kbd> and the size with <kbd>Right 🖱️</kbd>.
+2. Resize or stretch the photo by dragging one of its corner handles. Hold <kbd>Shift</kbd> while dragging to preserve its aspect ratio. Adjust the position of your screens with <kbd>Left 🖱️</kbd> and the size with <kbd>Right 🖱️</kbd>.
    You can also zoom with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd> and move the scene around with <kbd>Middle 🖱️</kbd>.
 3. Save the images that will be your wallpaper by clicking <kbd>💾 Save</kbd> or
    apply them directly by clicking <kbd>✔️ Ok</kbd>.
