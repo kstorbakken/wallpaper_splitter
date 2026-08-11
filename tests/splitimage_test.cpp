@@ -1,5 +1,7 @@
 #include <QColor>
 #include <QDir>
+#include <QGraphicsTextItem>
+#include <QGraphicsView>
 #include <QImage>
 #include <QGraphicsScene>
 #include <QTemporaryDir>
@@ -21,6 +23,7 @@ private slots:
     void resizeStopsAtOppositeCorner();
     void resizeCannotExposeMonitorLayout();
     void screenControlsAcceptMoveAndScaleButtons();
+    void emptyStateRemainsCenteredWhenWindowResizes();
 };
 
 void SplitImageTest::preservesRectangleOrderAndPixels() {
@@ -190,6 +193,26 @@ void SplitImageTest::screenControlsAcceptMoveAndScaleButtons() {
 
     QVERIFY(screens->acceptedMouseButtons().testFlag(Qt::LeftButton));
     QVERIFY(screens->acceptedMouseButtons().testFlag(Qt::RightButton));
+}
+
+void SplitImageTest::emptyStateRemainsCenteredWhenWindowResizes() {
+    WallpaperSplitter splitter;
+    splitter.resize(400, 300);
+    splitter.show();
+    QApplication::processEvents();
+
+    auto *view = splitter.findChild<QGraphicsView *>();
+    QVERIFY(view != nullptr);
+    auto *label = qgraphicsitem_cast<QGraphicsTextItem *>(view->scene()->items().constFirst());
+    QVERIFY(label != nullptr);
+
+    splitter.resize(800, 600);
+    QApplication::processEvents();
+
+    const QPoint labelCenter = view->mapFromScene(label->sceneBoundingRect().center());
+    const QPoint viewportCenter = view->viewport()->rect().center();
+    QVERIFY(qAbs(labelCenter.x() - viewportCenter.x()) <= 1);
+    QVERIFY(qAbs(labelCenter.y() - viewportCenter.y()) <= 1);
 }
 
 QTEST_MAIN(SplitImageTest)
