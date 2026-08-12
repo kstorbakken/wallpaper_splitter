@@ -66,6 +66,10 @@ To install it after building:
 cmake --install build
 ```
 
+Tagged releases provide an AppImage plus `.deb`, `.rpm`, and Arch Linux
+`.pkg.tar.zst` packages on the
+[GitHub releases page](https://github.com/kstorbakken/wallpaper_splitter/releases).
+
 
 ## 💡 How to help
 

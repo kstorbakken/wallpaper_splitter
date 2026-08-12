@@ -56,6 +56,23 @@
     </screenshots>
     
     <releases>
+        <release version="1.2.0" date="2026-08-12">
+            <url type="details">https://github.com/kstorbakken/wallpaper_splitter/releases/tag/v1.2.0</url>
+            <description>
+                <p>Added:</p>
+                <ul>
+                    <li>Resize and stretch the wallpaper interactively using corner handles.</li>
+                    <li>Hold Shift while resizing to preserve the wallpaper's aspect ratio.</li>
+                    <li>Release builds now provide AppImage, Debian, RPM, and Arch Linux packages.</li>
+                </ul>
+                <p>Changed:</p>
+                <ul>
+                    <li>Keep the wallpaper fitted when the application window is resized.</li>
+                    <li>Keep monitor names centered while resizing and zooming.</li>
+                </ul>
+            </description>
+        </release>
+
         <release version="1.1.4" date="2026-08-11">
             <url type="details">https://github.com/kstorbakken/wallpaper_splitter/releases/tag/v1.1.4</url>
             <description>

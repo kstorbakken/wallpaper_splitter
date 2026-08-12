@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(wallpaper_splitter VERSION 1.1.4 LANGUAGES CXX)
+project(wallpaper_splitter VERSION 1.2.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -57,6 +57,32 @@ install(FILES assets/metainfo.xml
 install(FILES assets/wallpaper_splitter.desktop
     DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
     RENAME ${WALLPAPER_SPLITTER_APP_ID}.desktop)
+
+# Native release packages. Keep this metadata here so local CPack builds and
+# release CI produce the same artifacts.
+set(CPACK_PACKAGE_NAME "wallpaper-splitter")
+set(CPACK_PACKAGE_VENDOR "Wallpaper Splitter contributors")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "Split and span a wallpaper across multiple screens on KDE Plasma")
+set(CPACK_PACKAGE_HOMEPAGE_URL
+    "https://github.com/kstorbakken/wallpaper_splitter")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_CONTACT
+    "Wallpaper Splitter contributors <kstorbakken@users.noreply.github.com>")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_FILE_NAME
+    "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
+
+set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+
+set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-only")
+set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
+set(CPACK_RPM_PACKAGE_AUTOREQ ON)
+set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+
+include(CPack)
 
 include(CTest)
 if(BUILD_TESTING)
