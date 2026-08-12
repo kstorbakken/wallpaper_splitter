@@ -4,6 +4,7 @@
 #include <QGraphicsView>
 #include <QImage>
 #include <QGraphicsScene>
+#include <QPainter>
 #include <QScrollBar>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -262,9 +263,11 @@ void SplitImageTest::monitorLabelRemainsCenteredAtDifferentZoomLevels() {
     group->addToGroup(screen);
     auto *label = new CenteredTextItem(QStringLiteral("PHL 241E1"),
                                        screen->rect().center());
+    label->setDefaultTextColor(Qt::black);
     group->addToGroup(label);
 
     QGraphicsView view(&scene);
+    view.setBackgroundBrush(Qt::white);
     view.setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     view.setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     view.show();
@@ -280,6 +283,26 @@ void SplitImageTest::monitorLabelRemainsCenteredAtDifferentZoomLevels() {
                                           .mapRect(label->boundingRect());
         QVERIFY(qAbs(screenInView.center().x() - labelInView.center().x()) <= 1.0);
         QVERIFY(qAbs(screenInView.center().y() - labelInView.center().y()) <= 1.0);
+
+        QImage rendered(view.viewport()->size(), QImage::Format_RGB32);
+        rendered.fill(Qt::white);
+        QPainter painter(&rendered);
+        view.viewport()->render(&painter);
+        painter.end();
+
+        const QRect sample = labelInView.toAlignedRect().intersected(rendered.rect());
+        int firstTextRow = sample.bottom();
+        int lastTextRow = sample.top();
+        for (int y = sample.top(); y <= sample.bottom(); ++y) {
+            for (int x = sample.left(); x <= sample.right(); ++x) {
+                if (qGray(rendered.pixel(x, y)) < 128) {
+                    firstTextRow = qMin(firstTextRow, y);
+                    lastTextRow = qMax(lastTextRow, y);
+                }
+            }
+        }
+        QVERIFY2(lastTextRow - firstTextRow >= 6,
+                 "The monitor label was clipped vertically");
     }
 }
 

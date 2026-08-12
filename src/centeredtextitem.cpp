@@ -1,4 +1,5 @@
 #include <QPainter>
+#include <QStyleOptionGraphicsItem>
 #include <QTransform>
 
 #include "centeredtextitem.h"
@@ -27,8 +28,11 @@ QPainterPath CenteredTextItem::shape() const {
 void CenteredTextItem::paint(QPainter *painter,
                              const QStyleOptionGraphicsItem *option,
                              QWidget *widget) {
+    QStyleOptionGraphicsItem translatedOption(*option);
+    translatedOption.exposedRect.translate(-contentOffset());
+
     painter->save();
     painter->translate(contentOffset());
-    QGraphicsTextItem::paint(painter, option, widget);
+    QGraphicsTextItem::paint(painter, &translatedOption, widget);
     painter->restore();
 }
