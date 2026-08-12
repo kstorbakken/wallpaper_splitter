@@ -1,0 +1,261 @@
+name: Release packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debian-package:
+    name: Debian package
+    runs-on: ubuntu-latest
+    container: debian:trixie-slim
+
+    steps:
+      - name: Install build and packaging dependencies
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            dpkg-dev \
+            extra-cmake-modules \
+            file \
+            git \
+            libkf6configwidgets-dev \
+            qt6-base-dev
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches project version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          project_version="$(sed -nE 's/^project\(wallpaper_splitter VERSION ([^ ]+) .*/\1/p' CMakeLists.txt)"
+          test "${GITHUB_REF_NAME}" = "v${project_version}"
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build/package \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_TESTING=OFF
+          cmake --build build/package --parallel
+
+      - name: Build Debian package
+        run: cpack --config build/package/CPackConfig.cmake -G DEB -B dist
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: dist/*.deb
+          if-no-files-found: error
+
+  rpm-package:
+    name: RPM package
+    runs-on: ubuntu-latest
+    container: fedora:latest
+
+    steps:
+      - name: Install build and packaging dependencies
+        run: dnf install --assumeyes cmake extra-cmake-modules gcc-c++ git kf6-kconfigwidgets-devel qt6-qtbase-devel rpm-build
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches project version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          project_version="$(sed -nE 's/^project\(wallpaper_splitter VERSION ([^ ]+) .*/\1/p' CMakeLists.txt)"
+          test "${GITHUB_REF_NAME}" = "v${project_version}"
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build/package \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_TESTING=OFF
+          cmake --build build/package --parallel
+
+      - name: Build RPM package
+        run: cpack --config build/package/CPackConfig.cmake -G RPM -B dist
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-package
+          path: dist/*.rpm
+          if-no-files-found: error
+
+  arch-package:
+    name: Arch Linux package
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+
+    steps:
+      - name: Install build dependencies
+        run: pacman --sync --refresh --sysupgrade --noconfirm cmake extra-cmake-modules git kconfigwidgets qt6-base
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches project version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          project_version="$(sed -nE 's/^project\(wallpaper_splitter VERSION ([^ ]+) .*/\1/p' CMakeLists.txt)"
+          test "${GITHUB_REF_NAME}" = "v${project_version}"
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build/package \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_TESTING=OFF
+          cmake --build build/package --parallel
+
+      - name: Stage package
+        run: DESTDIR="${PWD}/build/pkgroot" cmake --install build/package --strip
+
+      - name: Create pacman package
+        shell: bash
+        run: |
+          version="$(sed -nE 's/^project\(wallpaper_splitter VERSION ([^ ]+) .*/\1/p' CMakeLists.txt)"
+          installed_size="$(du --summarize --bytes build/pkgroot | cut --fields=1)"
+          build_date="$(date +%s)"
+          printf '%s\n' \
+            'pkgname = wallpaper_splitter' \
+            'pkgbase = wallpaper_splitter' \
+            "pkgver = ${version}-1" \
+            'pkgdesc = Split and span a single wallpaper across multiple screens on KDE Plasma' \
+            'url = https://github.com/kstorbakken/wallpaper_splitter' \
+            "builddate = ${build_date}" \
+            'packager = Wallpaper Splitter release CI' \
+            "size = ${installed_size}" \
+            'arch = x86_64' \
+            'license = GPL-3.0-only' \
+            'depend = kconfigwidgets' \
+            'depend = qt6-base' > build/pkgroot/.PKGINFO
+          mkdir -p dist
+          bsdtar --create --file "dist/wallpaper_splitter-${version}-1-x86_64.pkg.tar.zst" \
+            --zstd --cd build/pkgroot .
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: dist/*.pkg.tar.zst
+          if-no-files-found: error
+
+  appimage:
+    name: AppImage
+    runs-on: ubuntu-latest
+    # KDE neon supplies KF6 on an Ubuntu 24.04 base, keeping the AppImage's
+    # glibc requirement substantially older than Debian Trixie's.
+    container: invent-registry.kde.org/neon/docker-images/plasma:user
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            extra-cmake-modules \
+            file \
+            git \
+            libkf6configwidgets-dev \
+            qt6-base-dev \
+            wget
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches project version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          project_version="$(sed -nE 's/^project\(wallpaper_splitter VERSION ([^ ]+) .*/\1/p' CMakeLists.txt)"
+          test "${GITHUB_REF_NAME}" = "v${project_version}"
+
+      - name: Configure, build, and stage AppDir
+        run: |
+          cmake -S . -B build/appimage \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_TESTING=OFF
+          cmake --build build/appimage --parallel
+          DESTDIR="${PWD}/AppDir" cmake --install build/appimage --strip
+
+      - name: Download AppImage packaging tools
+        run: |
+          mkdir -p tools
+          wget --quiet --output-document tools/linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget --quiet --output-document tools/linuxdeploy-plugin-qt-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x tools/*.AppImage
+
+      - name: Build AppImage
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          QMAKE: qmake6
+        run: |
+          version="$(sed -nE 's/^project\(wallpaper_splitter VERSION ([^ ]+) .*/\1/p' CMakeLists.txt)"
+          tools/linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/wallpaper_splitter \
+            --desktop-file AppDir/usr/share/applications/io.github.kstorbakken.wallpaper_splitter.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/io.github.kstorbakken.wallpaper_splitter.svg \
+            --plugin qt \
+            --output appimage
+          mkdir -p dist
+          mv ./*.AppImage "dist/wallpaper-splitter-${version}-x86_64.AppImage"
+
+      - name: Smoke-test AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          QT_QPA_PLATFORM: offscreen
+        run: dist/*.AppImage --version
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage-package
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish release assets
+    if: github.ref_type == 'tag'
+    needs:
+      - arch-package
+      - appimage
+      - debian-package
+      - rpm-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-package"
+          path: dist
+          merge-multiple: true
+
+      - name: Add packages to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
