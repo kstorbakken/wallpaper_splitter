@@ -10,6 +10,7 @@
 #include <QDebug>
 #include <QGraphicsScene>
 #include <QGraphicsView>
+#include "centeredtextitem.h"
 #include "screensitem.h"
 
 ScreensItem::ScreensItem(QGraphicsItem *parent) : QGraphicsItemGroup(parent) {
@@ -50,14 +51,7 @@ void ScreensItem::addScreens() {
         addToGroup(rect);
         rectangles.append(rect);
 
-        auto name = new QGraphicsTextItem(screen->model());
-        name->adjustSize();
-        name->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-
-        // todo center text
-        auto boundingRect = name->boundingRect();
-        name->setTransformOriginPoint(boundingRect.center());
-        name->setPos(screen->geometry().center() - boundingRect.center());
+        auto name = new CenteredTextItem(screen->model(), screen->geometry().center());
         addToGroup(name);
     });
 }

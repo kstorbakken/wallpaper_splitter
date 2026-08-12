@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "centeredtextitem.h"
 #include "resizableimageitem.h"
 #include "screensitem.h"
 #include "wallpapersplitter.h"
@@ -26,6 +27,7 @@ private slots:
     void screenControlsAcceptMoveAndScaleButtons();
     void emptyStateRemainsCenteredWhenWindowResizes();
     void imageRemainsFullyVisibleAcrossWindowResizes();
+    void monitorLabelRemainsCenteredAtDifferentZoomLevels();
 };
 
 void SplitImageTest::preservesRectangleOrderAndPixels() {
@@ -249,6 +251,35 @@ void SplitImageTest::imageRemainsFullyVisibleAcrossWindowResizes() {
                                     .arg(view->viewport()->height())
                                     .arg(windowSize.width())
                                     .arg(windowSize.height())));
+    }
+}
+
+void SplitImageTest::monitorLabelRemainsCenteredAtDifferentZoomLevels() {
+    QGraphicsScene scene;
+    auto *group = new QGraphicsItemGroup();
+    scene.addItem(group);
+    auto *screen = new QGraphicsRectItem(QRectF(0, 0, 1920, 1080));
+    group->addToGroup(screen);
+    auto *label = new CenteredTextItem(QStringLiteral("PHL 241E1"),
+                                       screen->rect().center());
+    group->addToGroup(label);
+
+    QGraphicsView view(&scene);
+    view.setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    view.setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    view.show();
+
+    for (const QSize &viewSize : {QSize(400, 260), QSize(600, 400), QSize(1000, 700)}) {
+        view.resize(viewSize);
+        view.fitInView(screen->sceneBoundingRect(), Qt::KeepAspectRatio);
+        QApplication::processEvents();
+
+        const QRectF screenInView = screen->deviceTransform(view.viewportTransform())
+                                           .mapRect(screen->boundingRect());
+        const QRectF labelInView = label->deviceTransform(view.viewportTransform())
+                                          .mapRect(label->boundingRect());
+        QVERIFY(qAbs(screenInView.center().x() - labelInView.center().x()) <= 1.0);
+        QVERIFY(qAbs(screenInView.center().y() - labelInView.center().y()) <= 1.0);
     }
 }
 

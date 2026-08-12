@@ -27,6 +27,7 @@ qt_add_executable(wallpaper_splitter
         src/wallpapersplitter.ui
         src/screensitem.cpp
         src/graphicsview.cpp
+        src/centeredtextitem.cpp
         src/resizableimageitem.cpp
 )
 
@@ -67,6 +68,7 @@ if(BUILD_TESTING)
             src/wallpapersplitter.ui
             src/screensitem.cpp
             src/graphicsview.cpp
+            src/centeredtextitem.cpp
             src/resizableimageitem.cpp)
     target_include_directories(splitimage_test PRIVATE src)
     target_link_libraries(splitimage_test PRIVATE
