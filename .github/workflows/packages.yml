@@ -165,8 +165,8 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          apt-get update
-          apt-get install --yes --no-install-recommends \
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
             build-essential \
             ca-certificates \
             cmake \
