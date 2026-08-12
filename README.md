@@ -39,9 +39,6 @@ _Some of these features might not be implemented yet._
 3. Save the images that will be your wallpaper by clicking <kbd>💾 Save</kbd> or
    apply them directly by clicking <kbd>✔️ Ok</kbd>.
 
-Note that the buttons in the screenshot are labeled in German.
-
-
 ## ⚙️ How does it work
 
 Opening and splitting the image is straightforward.
