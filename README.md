@@ -3,9 +3,10 @@
 [![CI](https://github.com/kstorbakken/wallpaper_splitter/actions/workflows/ci.yml/badge.svg)](https://github.com/kstorbakken/wallpaper_splitter/actions/workflows/ci.yml)
 
 > [!NOTE]
-> This is the actively maintained fork of the original
+> This is an independent fork of the original
 > [Wallpaper Splitter](https://github.com/l0drex/wallpaper_splitter) project.
-> Development, issues, and releases continue in this repository.
+> It contains additional maintenance and feature work, but is not an official
+> continuation of or endorsed by the original project.
 
 On KDE it is not possible to apply an image so that it spans across all of your screens.
 This tool fixes that by splitting your image according to your screen setup.
@@ -29,8 +30,8 @@ This is an overview of the currently supported functionality.
 
 *there is a bug with diagonal scaling
 
-See the [roadmap](ROADMAP.md) for planned work, including feature requests
-carried over from the original project.
+See the [roadmap](ROADMAP.md) for ideas under consideration, including requests
+originally filed in the original project's issue tracker.
 
 ## 💭 How to use it
 
@@ -71,9 +72,10 @@ Tagged releases provide an AppImage plus `.deb`, `.rpm`, and Arch Linux
 
 ## 💡 How to help
 
-Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for the development workflow.
-If you are able to implement these features directly into plasma, I would love to see that!
+Pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development workflow and [ROADMAP.md](ROADMAP.md) for ideas under consideration.
+The long-term hope is to contribute the core multi-screen spanning capability
+directly to Plasma.
 
 
 ## License and authors
