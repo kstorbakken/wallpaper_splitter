@@ -1,13 +1,13 @@
 # Roadmap
 
-This page tracks ideas rather than commitments or a release schedule. New work
-should be discussed in the [active repository's issues][active-issues].
+This page collects ideas for this independent fork. It is not a commitment,
+release schedule, or statement of direction on behalf of the original project.
 
-## Requests inherited from the original project
+## Requests from the original project
 
 The original Wallpaper Splitter repository still contains useful feature
-requests. Their status below describes this maintained fork, not the state shown
-on the original issues.
+requests. Their status below describes this independent fork only, not the state
+shown on the original issues.
 
 | Status | Request | Notes |
 | --- | --- | --- |
@@ -99,7 +99,6 @@ a direction rather than a promised release. KDE accepts external changes through
 reviewed merge requests, and a KDE developer account is not required to submit
 one; see KDE's [development contribution guide][kde-contributing].
 
-[active-issues]: https://github.com/kstorbakken/wallpaper_splitter/issues
 [kde-393781]: https://bugs.kde.org/show_bug.cgi?id=393781
 [kde-contributing]: https://community.kde.org/Infrastructure/GitLab
 [plasma-workspace]: https://invent.kde.org/plasma/plasma-workspace
