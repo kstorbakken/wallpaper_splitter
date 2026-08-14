@@ -15,7 +15,7 @@ It can also directly apply the image as your wallpaper.
 Keep in mind that this only works with images, not with any fancy wallpaper engine or even dynamic wallpapers.
 
 
-## 🚀 Features and roadmap
+## 🚀 Features
 
 This is an overview of the currently supported functionality.
 
@@ -23,19 +23,20 @@ This is an overview of the currently supported functionality.
 - [x] Apply the wallpaper from within the application
 - [x] Adjust position
 - [x] Adjust scale*
-- [ ] Zooming into the scene and moving it around with the mouse wheel (scroll / click)
+- [x] Zoom into the scene with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd>
 - [x] Command line tool
 - [x] Support drag 'n drop
 
 *there is a bug with diagonal scaling
 
-## 💭 How to use it
+See the [roadmap](ROADMAP.md) for planned work, including feature requests
+carried over from the original project.
 
-_Some of these features might not be implemented yet._
+## 💭 How to use it
 
 1. Click <kbd>📂 Open</kbd> to select your image.
 2. Resize or stretch the photo by dragging one of its corner handles. Hold <kbd>Shift</kbd> while dragging to preserve its aspect ratio. Adjust the position of your screens with <kbd>Left 🖱️</kbd> and the size with <kbd>Right 🖱️</kbd>.
-   You can also zoom with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd> and move the scene around with <kbd>Middle 🖱️</kbd>.
+   You can also zoom with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd>.
 3. Save the images that will be your wallpaper by clicking <kbd>💾 Save</kbd> or
    apply them directly by clicking <kbd>✔️ Ok</kbd>.
 
