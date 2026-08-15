@@ -1,291 +1,225 @@
-//
-// Created by l0drex on 15.09.21.
-//
-
-// You may need to build the project (run Qt uic code generator) to get "ui_WallpaperSplitter.h" resolved
-
-#include <QFileDialog>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QApplication>
-#include <QScreen>
-#include <QDBusMessage>
-#include <QDBusConnection>
-#include <QCryptographicHash>
-#include <QJsonDocument>
-#include <QPushButton>
 #include "wallpapersplitter.h"
-#include "ui_wallpapersplitter.h"
-#include "screensitem.h"
+
+#include <QApplication>
+#include <QFileDialog>
+#include <QGraphicsScene>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QScreen>
+#include <QStandardPaths>
+
 #include "graphicsview.h"
 #include "resizableimageitem.h"
+#include "settingsdialog.h"
+#include "ui_wallpapersplitter.h"
 
-
-WallpaperSplitter::WallpaperSplitter(QWidget *parent) :
-        QDialog(parent), ui(new Ui::WallpaperSplitter) {
+WallpaperSplitter::WallpaperSplitter(QWidget *parent)
+        : QDialog(parent), ui(new Ui::WallpaperSplitter), preferences(AppSettings::load()) {
     ui->setupUi(this);
-
-    // replace the standard graphics view with my subclass
-    auto graphicsView = new GraphicsView(this);
+    auto *graphicsView = new GraphicsView(this);
     delete ui->verticalLayout->replaceWidget(ui->graphicsView, graphicsView)->widget();
     ui->graphicsView = graphicsView;
 
-    auto scene = new QGraphicsScene();
+    auto *scene = new QGraphicsScene(this);
     ui->graphicsView->setScene(scene);
-    auto text = ui->graphicsView->scene()->addText(tr("Drop an image here"));
-    // make sure its fixed size
+    auto *text = scene->addText(tr("Drop an image here"));
     text->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    // center it
-    auto rect = text->boundingRect();
+    const QRectF rect = text->boundingRect();
     text->setTransformOriginPoint(rect.center());
     text->setPos(-rect.width() / 2.0, -rect.height() / 2.0);
     ui->graphicsView->centerOn(text);
-    imageFile = new QFileInfo();
+
+    auto *applyButton = ui->buttonBox->button(QDialogButtonBox::Ok);
+    auto *exportButton = ui->buttonBox->button(QDialogButtonBox::Save);
+    applyButton->setText(tr("Apply"));
+    exportButton->setText(tr("Export"));
+    applyButton->setEnabled(false);
+    exportButton->setEnabled(false);
 
     connect(ui->buttonBoxOpen, &QDialogButtonBox::accepted,
             this, &WallpaperSplitter::selectImage);
-    connect(ui->buttonBox->button(QDialogButtonBox::StandardButton::Ok), &QPushButton::pressed,
-            this, &WallpaperSplitter::applyWallpaper);
-    connect(ui->buttonBox->button(QDialogButtonBox::StandardButton::Save), &QPushButton::pressed,
-            this, &WallpaperSplitter::saveWallpapers);
-    connect(ui->buttonBox, &QDialogButtonBox::rejected,
-            this, &QDialog::reject);
+    connect(applyButton, &QPushButton::pressed, this, &WallpaperSplitter::applyWallpaper);
+    connect(exportButton, &QPushButton::pressed, this, &WallpaperSplitter::exportWallpapers);
+    connect(ui->settingsButton, &QPushButton::pressed, this, &WallpaperSplitter::showSettings);
+    connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 }
 
-/**
- * Opens a dialog that asks the user to select an image.
- *
- * Then sets the file info and image attribute, displays the image and calls addScreens().
- * The image will be scaled to fit on all screens, also the graphics view will be scaled to show the whole image.
- */
+WallpaperSplitter::~WallpaperSplitter() {
+    delete ui;
+}
+
 void WallpaperSplitter::selectImage() {
-    const auto url = QFileDialog::getOpenFileUrl(
-            this,
-            tr("Select a wallpaper image"),
-            "file://" + QStandardPaths::writableLocation(QStandardPaths::PicturesLocation),
-            QString("Images (*.jpg *.png *.bmp)")
-    );
+    const QUrl url = QFileDialog::getOpenFileUrl(
+            this, tr("Select a wallpaper image"), QUrl::fromLocalFile(preferences.inputDirectory),
+            tr("Images (*.jpg *.jpeg *.png *.bmp *.webp)"));
     addImage(url);
 }
 
-/**
- * Splits the selected image and returns a list to all paths where the images were saved.
- */
+void WallpaperSplitter::displayImage(const QImage &image) {
+    ui->graphicsView->scene()->clear();
+    imageItem = new ResizableImageItem(image);
+    ui->graphicsView->scene()->addItem(imageItem);
+    screenGroup = new ScreensItem(imageItem);
+    imageItem->setScreenGroup(screenGroup);
+
+    const QSize screenSize = totalScreenSize();
+    if (image.width() < screenSize.width() || image.height() < screenSize.height()) {
+        const QImage scaled = image.scaled(screenSize, Qt::KeepAspectRatioByExpanding,
+                                           Qt::SmoothTransformation);
+        const qreal scale = static_cast<qreal>(scaled.width()) / image.width();
+        screenGroup->setScale(1 / scale);
+        screenGroup->setPos(imageItem->scenePos());
+    }
+    screenGroup->setPos(imageItem->boundingRect().center()
+                        - screenGroup->boundingRect().center());
+    ui->buttonBox->button(QDialogButtonBox::Ok)->setEnabled(true);
+    ui->buttonBox->button(QDialogButtonBox::Save)->setEnabled(true);
+    scaleView();
+}
+
+void WallpaperSplitter::addImage(QImage &image) {
+    if (image.isNull()) {
+        QMessageBox::warning(this, tr("Could not open image"),
+                             tr("The dropped image could not be loaded."));
+        return;
+    }
+    imageFile = QFileInfo();
+    originalImageSize = image.size();
+    displayImage(image);
+}
+
+void WallpaperSplitter::addImage(const QUrl &url) {
+    if (url.isEmpty()) return;
+    if (!url.isLocalFile()) {
+        QMessageBox::warning(this, tr("Could not open image"),
+                             tr("Only local image files are supported."));
+        return;
+    }
+    const QFileInfo candidate(url.toLocalFile());
+    const QImage image(candidate.filePath());
+    if (image.isNull()) {
+        QMessageBox::warning(this, tr("Could not open image"),
+                             tr("The image %1 could not be loaded.").arg(candidate.filePath()));
+        return;
+    }
+    imageFile = candidate;
+    originalImageSize = image.size();
+    preferences.inputDirectory = candidate.absolutePath();
+    AppSettings::save(preferences);
+    displayImage(image);
+}
+
+QList<ScreenCrop> WallpaperSplitter::currentScreenCrops() const {
+    QList<ScreenCrop> result;
+    if (screenGroup == nullptr) return result;
+    const auto rectangles = screenGroup->getRectangles();
+    const auto screens = QApplication::screens();
+    for (int index = 0; index < rectangles.size(); ++index) {
+        const QScreen *screen = screens.value(index);
+        const QString screenName = screen == nullptr || screen->name().isEmpty()
+                ? QStringLiteral("screen-%1").arg(index + 1) : screen->name();
+        result.append({screenName, index + 1,
+                       screen == nullptr ? QRect() : screen->geometry(),
+                       screenGroup->mapRectToParent(rectangles.at(index)->rect()).toAlignedRect()});
+    }
+    return result;
+}
+
+QString WallpaperSplitter::sourceName() const {
+    return imageFile.isFile() ? imageFile.fileName() : QStringLiteral("wallpaper");
+}
+
+void WallpaperSplitter::exportWallpapers() {
+    const QString directory = QFileDialog::getExistingDirectory(
+            this, tr("Export wallpaper crops"), preferences.exportDirectory,
+            QFileDialog::ShowDirsOnly);
+    if (directory.isEmpty()) return;
+
+    ExportOptions options{directory, preferences.fileNameTemplate, preferences.collisionPolicy};
+    OperationResult result = OutputService::exportCrops(
+            imageItem->image(), currentScreenCrops(), sourceName(), options);
+    if (!result.success && result.error == OperationError::Collision
+        && options.collisionPolicy == CollisionPolicy::Ask) {
+        QMessageBox question(QMessageBox::Question, tr("Export files already exist"),
+                             tr("Replace the existing crop files or create a new revision?"),
+                             QMessageBox::Cancel, this);
+        QPushButton *replace = question.addButton(tr("Replace"), QMessageBox::DestructiveRole);
+        QPushButton *revision = question.addButton(tr("New Revision"), QMessageBox::AcceptRole);
+        question.exec();
+        if (question.clickedButton() == replace) options.collisionPolicy = CollisionPolicy::Replace;
+        else if (question.clickedButton() == revision) options.collisionPolicy = CollisionPolicy::Revision;
+        else return;
+        result = OutputService::exportCrops(
+                imageItem->image(), currentScreenCrops(), sourceName(), options);
+    }
+    if (!result.success) {
+        showOperationError(result);
+        return;
+    }
+    preferences.exportDirectory = directory;
+    AppSettings::save(preferences);
+}
+
+void WallpaperSplitter::applyWallpaper() {
+    DBusPlasmaApplicator applicator;
+    const OperationResult result = OutputService::applyManaged(
+            imageItem->image(), originalImageSize, currentScreenCrops(), sourceName(),
+            imageFile.isFile() ? imageFile.absoluteFilePath() : QString(), applicator);
+    if (!result.success) {
+        showOperationError(result);
+        return;
+    }
+    accept();
+}
+
+void WallpaperSplitter::showSettings() {
+    SettingsDialog dialog(preferences, this);
+    if (dialog.exec() != QDialog::Accepted) return;
+    preferences = dialog.preferences();
+    AppSettings::save(preferences);
+}
+
+void WallpaperSplitter::showOperationError(const OperationResult &result) {
+    QMessageBox::critical(this, tr("Wallpaper operation failed"), result.message);
+}
+
 QStringList WallpaperSplitter::splitImage(const QImage &image, const QList<QRect> &screens,
                                           const QString &path, const QString &outputBaseName) {
-    if (screens.isEmpty()) {
-        qFatal("No area to cut out provided!");
+    QList<ScreenCrop> crops;
+    for (int index = 0; index < screens.size(); ++index) {
+        crops.append({QStringLiteral("screen-%1").arg(index + 1), index + 1, {}, screens.at(index)});
     }
-    if (image.isNull() || image.sizeInBytes() < 0) {
-        qFatal("Image could not be loaded");
-    }
-
-    QRect cropBounds;
-    for (const QRect &screen : screens) {
-        cropBounds = cropBounds.isNull() ? screen : cropBounds.united(screen);
-    }
-    if (cropBounds.width() > image.width() || cropBounds.height() > image.height()) {
-        qFatal("Combined crop area is larger than the source image");
-    }
-
-    QPoint correction;
-    if (cropBounds.left() < image.rect().left()) {
-        correction.setX(image.rect().left() - cropBounds.left());
-    } else if (cropBounds.right() > image.rect().right()) {
-        correction.setX(image.rect().right() - cropBounds.right());
-    }
-    if (cropBounds.top() < image.rect().top()) {
-        correction.setY(image.rect().top() - cropBounds.top());
-    } else if (cropBounds.bottom() > image.rect().bottom()) {
-        correction.setY(image.rect().bottom() - cropBounds.bottom());
-    }
-    if (!correction.isNull()) {
-        qWarning() << "Moving crop layout by" << correction
-                   << "to fit source" << image.rect();
-    }
-
-    const QString safeBaseName = QFileInfo(outputBaseName).completeBaseName();
-
-    QImage wallpaper;
-    QString fileName;
-    QStringList paths{};
-    QDir().mkpath(path);
-    int index = 0;
-
-    std::for_each(screens.begin(), screens.end(), [&](QRect screen){
-        screen.translate(correction);
-        qDebug() << "Cropping" << screen << "from source" << image.rect();
-        if (!image.rect().contains(screen)) {
-            qFatal("Crop rectangle is outside the source image");
-        }
-
-        // copy a rectangle with size and position of the screen
-        wallpaper = image.copy(screen);
-        qDebug() << "Generated crop" << index << wallpaper.size();
-
-        const QByteArrayView pixels(
-                reinterpret_cast<const char *>(wallpaper.constBits()),
-                wallpaper.sizeInBytes());
-        const QString digest = QString::fromLatin1(
-                QCryptographicHash::hash(pixels, QCryptographicHash::Sha256)
-                        .toHex().left(16));
-        // Keep all output in the selected directory. The crop-content digest
-        // makes Plasma reload changed pixels even if the source name is reused.
-        fileName = path + '/' + safeBaseName + '-'
-                + QString::number(index + 1) + '-' + digest + ".png";
-        paths.append(fileName);
-
-        // if this returns false, the save failed and the assertion fails
-        bool success = wallpaper.save(fileName);
-        assert(success);
-        index++;
-    });
-
-    return paths;
+    const ExportOptions options{path, QStringLiteral("{source}-{number}-{digest}"),
+                                CollisionPolicy::Replace};
+    const OperationResult result = OutputService::exportCrops(image, crops, outputBaseName, options);
+    if (!result.success) qWarning().noquote() << result.message;
+    return result.paths;
 }
 
 QStringList WallpaperSplitter::splitImage(const QImage &image, const QString &path,
                                           const QPoint topLeft, const QPoint bottomRight,
                                           const QString &outputBaseName) {
-    QList<QRect> screenGeometries{};
+    QList<QRect> geometries;
     const auto screens = QApplication::screens();
-    std::for_each(screens.begin(), screens.end(), [&](const QScreen* screen){
-        // set top-left corner
+    for (const QScreen *screen : screens) {
         QRect geometry = screen->geometry();
-        QPoint delta = screen->geometry().topLeft() - screens.first()->geometry().topLeft();
+        const QPoint delta = screen->geometry().topLeft() - screens.first()->geometry().topLeft();
         geometry.moveTopLeft(topLeft + delta);
-        // set bottom-right to desired position, if possible
         if (bottomRight.manhattanLength() > 0) {
-            geometry.setSize(geometry.size().scaled(bottomRight.x(), bottomRight.y(), Qt::KeepAspectRatio));
+            geometry.setSize(geometry.size().scaled(bottomRight.x(), bottomRight.y(),
+                                                    Qt::KeepAspectRatio));
         }
-        screenGeometries.append(geometry);
-    });
-
-    return splitImage(image, screenGeometries, path, outputBaseName);
-}
-
-QStringList WallpaperSplitter::splitImage() {
-    setCursor(Qt::WaitCursor);
-
-    QList<QRect> screens = {};
-    const auto screenItems = screenGroup->getRectangles();
-    std::for_each(screenItems.begin(), screenItems.end(), [&](const QGraphicsRectItem *screen){
-        screens.append(screenGroup->mapRectToParent(screen->rect()).toAlignedRect());
-    });
-
-    QString path;
-    if (imageFile->isFile()) {
-        path = QFileDialog::getExistingDirectory(
-                this, "",
-                imageFile->absolutePath(), QFileDialog::ShowDirsOnly);
-    } else {
-        path = QFileDialog::getExistingDirectory(
-                this, "",
-                QStandardPaths::standardLocations(QStandardPaths::PicturesLocation)[0], QFileDialog::ShowDirsOnly);
+        geometries.append(geometry);
     }
-
-    unsetCursor();
-    return WallpaperSplitter::splitImage(
-            imageItem->image(), screens, path, imageFile->completeBaseName());
+    return splitImage(image, geometries, path, outputBaseName);
 }
 
-/**
- * Applies the selected image to all screens in the current activity.
- */
-void WallpaperSplitter::applyWallpaper() {
-    auto paths = splitImage();
-    assert(!paths.isEmpty());
-
-    const auto screens = QApplication::screens();
-    assert(paths.size() == screens.size());
-
-    // Qt and Plasma can assign different numeric indices to the same physical
-    // screen. Pass each crop's virtual-desktop geometry so Plasma can match it
-    // to the containment's screenGeometry() without relying on index order.
-    QVariantList crops;
-    for (int index = 0; index < paths.size(); ++index) {
-        const QRect geometry = screens.at(index)->geometry();
-        crops.append(QVariantMap{
-                {"path", paths.at(index)},
-                {"x", geometry.x()},
-                {"y", geometry.y()},
-                {"width", geometry.width()},
-                {"height", geometry.height()}
-        });
-    }
-    const QString cropArray = QString::fromUtf8(
-            QJsonDocument::fromVariant(crops).toJson(QJsonDocument::Compact));
-    const QString script = QStringLiteral(R"(
-const crops = %1;
-function sameGeometry(crop, geometry) {
-    return crop.x === geometry.x && crop.y === geometry.y
-        && crop.width === geometry.width && crop.height === geometry.height;
-}
-function describeGeometry(geometry) {
-    return geometry.x + ',' + geometry.y + ' '
-        + geometry.width + 'x' + geometry.height;
-}
-for (const desktop of desktopsForActivity(currentActivity())) {
-    if (desktop.screen < 0) {
-        print('Skipping desktop ' + desktop.id + ' screen=' + desktop.screen);
-        continue;
-    }
-
-    const geometry = screenGeometry(desktop.screen);
-    const crop = crops.find(candidate => sameGeometry(candidate, geometry));
-    if (crop === undefined) {
-        print('No crop for desktop ' + desktop.id + ' screen=' + desktop.screen
-              + ' geometry=' + describeGeometry(geometry));
-        continue;
-    }
-
-    print('Desktop ' + desktop.id + ' screen=' + desktop.screen
-          + ' geometry=' + describeGeometry(geometry) + ' path=' + crop.path);
-    desktop.wallpaperPlugin = 'org.kde.image';
-    desktop.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
-    desktop.writeConfig('Image', crop.path);
-}
-)").arg(cropArray);
-
-    auto message = QDBusMessage::createMethodCall(
-            "org.kde.plasmashell",
-            "/PlasmaShell", "org.kde.PlasmaShell",
-            "evaluateScript");
-    message.setArguments(QVariantList() << script);
-
-    qDebug() << "Applying crops by virtual-desktop geometry:" << crops;
-    const auto reply = QDBusConnection::sessionBus().call(message);
-    if(reply.type() == QDBusMessage::ErrorMessage) {
-        qCritical() << "Something went wrong.";
-        qCritical() << reply.errorMessage();
-    } else if (!reply.arguments().isEmpty()) {
-        qDebug().noquote() << "Plasma assignment:\n"
-                           << reply.arguments().constFirst().toString();
-    }
-
-    QApplication::quit();
-}
-
-/**
- * Splits the image and saves the resulting wallpapers in a subdirectory
- */
-void WallpaperSplitter::saveWallpapers() {
-    splitImage();
-}
-
-/**
- * Calculates the total size of all screens combined.
- */
 QSize WallpaperSplitter::totalScreenSize() {
-    auto screens = QApplication::screens();
-    // get combined height and width of all screens
-    auto *screensRect = new QGraphicsItemGroup();
-    std::for_each(screens.begin(), screens.end(), [&](const QScreen* item){
-        screensRect->addToGroup(new QGraphicsRectItem(item->geometry()));
-    });
-
-    // subtract the width of the stroke
-    return screensRect->sceneBoundingRect().size().toSize() - QSize(1, 1);
+    QRect screensRect;
+    for (const QScreen *screen : QApplication::screens()) {
+        screensRect = screensRect.isNull() ? screen->geometry() : screensRect.united(screen->geometry());
+    }
+    return screensRect.size();
 }
 
 void WallpaperSplitter::resizeEvent(QResizeEvent *event) {
@@ -294,64 +228,15 @@ void WallpaperSplitter::resizeEvent(QResizeEvent *event) {
 }
 
 void WallpaperSplitter::scaleView() {
-    auto scene = ui->graphicsView->scene();
+    QGraphicsScene *scene = ui->graphicsView->scene();
     if (scene == nullptr || scene->items().isEmpty()) return;
-
-    // Keep fitInView from toggling automatic scrollbars while handling a
-    // resize. That can recursively change the viewport and leave the fitted
-    // scene clipped at particular window and image aspect ratios.
     ui->graphicsView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     ui->graphicsView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
     if (imageItem == nullptr) {
-        // The empty-state label ignores view transforms so it stays legible.
-        // Scaling its scene bounds would move it as the viewport changes.
         ui->graphicsView->resetTransform();
         ui->graphicsView->centerOn(scene->itemsBoundingRect().center());
         return;
     }
-
     ui->graphicsView->fitInView(scene->itemsBoundingRect(), Qt::KeepAspectRatio);
     ui->graphicsView->centerOn(imageItem);
-}
-
-WallpaperSplitter::~WallpaperSplitter() {
-    delete ui;
-}
-
-void WallpaperSplitter::addImage(QImage &image) {
-    ui->graphicsView->scene()->clear();
-
-    imageItem = new ResizableImageItem(image);
-    ui->graphicsView->scene()->addItem(imageItem);
-
-    screenGroup = new ScreensItem(imageItem);
-    imageItem->setScreenGroup(screenGroup);
-
-    // scale the desktops so that the image fits
-    const auto screenSize = totalScreenSize();
-    if(image.width() < screenSize.width() || image.height() < screenSize.height()) {
-        // this is hacky and not performant at all
-        auto imageScaled = image.scaled(screenSize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-        qreal scale = (float) imageScaled.width() / (float) image.width();
-        screenGroup->setScale(1 / scale);
-        screenGroup->setPos(imageItem->scenePos());
-    }
-
-    // Screen rectangles use virtual-desktop coordinates and may have a non-zero
-    // or negative origin. Position the group's bounding-rectangle center on the
-    // image center instead of adding the image center as an offset.
-    screenGroup->setPos(imageItem->boundingRect().center()
-                        - screenGroup->boundingRect().center());
-
-    scaleView();
-}
-
-void WallpaperSplitter::addImage(const QUrl &url) {
-    if(url.isEmpty()) return;
-
-    imageFile = new QFileInfo(url.path());
-    auto image = new QImage(imageFile->filePath());
-    qDebug() << "Image" << imageFile->fileName() << "selected.";
-    addImage(*image);
 }

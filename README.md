@@ -22,6 +22,9 @@ This is an overview of the currently supported functionality.
 
 - [x] Split a given image
 - [x] Apply the wallpaper from within the application
+- [x] Apply the wallpaper from the command line
+- [x] Export with configurable filenames and collision handling
+- [x] Remember input and export folders
 - [x] Adjust position
 - [x] Adjust scale*
 - [x] Zoom into the scene with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd>
@@ -38,13 +41,44 @@ originally filed in the original project's issue tracker.
 1. Click <kbd>📂 Open</kbd> to select your image.
 2. Resize or stretch the photo by dragging one of its corner handles. Hold <kbd>Shift</kbd> while dragging to preserve its aspect ratio. Adjust the position of your screens with <kbd>Left 🖱️</kbd> and the size with <kbd>Right 🖱️</kbd>.
    You can also zoom with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd>.
-3. Save the images that will be your wallpaper by clicking <kbd>💾 Save</kbd> or
-   apply them directly by clicking <kbd>✔️ Ok</kbd>.
+3. Click <kbd>Export</kbd> to save user-owned crop files, or <kbd>Apply</kbd> to
+   write a managed wallpaper set and use it on the current Plasma activity.
+
+Use <kbd>Settings…</kbd> to choose the remembered input and export folders, the
+export filename template, and what happens when an export already exists.
+Templates support `{source}`, `{screen}`, `{number}`, `{revision}`, and
+`{digest}`.
+
+Preferences follow the XDG base-directory convention and are stored in
+`~/.config/wallpaper-splitter/settings.conf`. Existing preferences from older
+versions are migrated automatically. Managed wallpaper sets created by
+<kbd>Apply</kbd> are stored in `~/.local/share/wallpaper-splitter/sets`.
+
+## Command line
+
+Passing an image starts the command-line exporter. Without `--destination`,
+files are written to an `<image>_split` directory beside the source image.
+
+```sh
+wallpaper_splitter --destination ~/Pictures/spanned wallpaper.jpg
+wallpaper_splitter --filename-template '{source}-{screen}' \
+  --collision revision wallpaper.jpg
+```
+
+Use `--apply` to write a managed set and apply it to the current Plasma
+activity. Export-only options cannot be combined with `--apply`.
+
+```sh
+wallpaper_splitter --apply wallpaper.jpg
+```
 
 ## ⚙️ How does it work
 
-Opening and splitting the image is straightforward.
-Applying the image is done via a dbus call to the Plasma Shell,
+Opening and splitting the image is straightforward. Exports remain owned by
+the user. Applied crops and their JSON manifest are kept in the application's
+local data directory so Plasma always references persistent files.
+
+Applying the image is done via a D-Bus call to the Plasma Shell,
 for more on that see their documentation provided [here](https://develop.kde.org/docs/plasma/scripting/api/).
 
 

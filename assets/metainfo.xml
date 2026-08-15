@@ -56,6 +56,24 @@
     </screenshots>
     
     <releases>
+        <release version="1.3.0" date="2026-08-14">
+            <url type="details">https://github.com/kstorbakken/wallpaper_splitter/releases/tag/v1.3.0</url>
+            <description>
+                <p>Added:</p>
+                <ul>
+                    <li>Remember input and export folders and configure export filename templates.</li>
+                    <li>Choose whether exports replace files, create a revision, or ask.</li>
+                    <li>Apply wallpapers from the command line with the new --apply option.</li>
+                </ul>
+                <p>Changed:</p>
+                <ul>
+                    <li>Apply now stores content-digested crops and a manifest in the application data directory.</li>
+                    <li>Export writes readable, user-owned files separately from managed applied sets.</li>
+                    <li>Command-line and graphical workflows now report recoverable errors instead of terminating on invalid input.</li>
+                </ul>
+            </description>
+        </release>
+
         <release version="1.2.0" date="2026-08-12">
             <url type="details">https://github.com/kstorbakken/wallpaper_splitter/releases/tag/v1.2.0</url>
             <description>

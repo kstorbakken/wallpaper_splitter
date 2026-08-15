@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(wallpaper_splitter VERSION 1.2.0 LANGUAGES CXX)
+project(wallpaper_splitter VERSION 1.3.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -29,6 +29,9 @@ qt_add_executable(wallpaper_splitter
         src/graphicsview.cpp
         src/centeredtextitem.cpp
         src/resizableimageitem.cpp
+        src/outputservice.cpp
+        src/appsettings.cpp
+        src/settingsdialog.cpp
 )
 
 target_link_libraries(wallpaper_splitter PRIVATE
@@ -96,6 +99,10 @@ if(BUILD_TESTING)
             src/graphicsview.cpp
             src/centeredtextitem.cpp
             src/resizableimageitem.cpp)
+    target_sources(splitimage_test PRIVATE
+            src/outputservice.cpp
+            src/appsettings.cpp
+            src/settingsdialog.cpp)
     target_include_directories(splitimage_test PRIVATE src)
     target_link_libraries(splitimage_test PRIVATE
             Qt6::Core

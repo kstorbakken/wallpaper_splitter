@@ -13,9 +13,9 @@ shown on the original issues.
 | --- | --- | --- |
 | ✅ Supported | [Inherit original filenames][upstream-13] | Generated crops use the source image's base name. More control over generated names is included in **Output settings** below. |
 | 🟡 Partial | [Scene actions][upstream-2] | Drag and drop and <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd> zoom are supported. Panning with a middle-button drag remains to be implemented. |
-| 📋 Proposed | [Configure default input and output folders][upstream-12] | Remember user-selected folders. This is part of **Output settings** below. |
+| ✅ Supported | [Configure default input and output folders][upstream-12] | The application remembers the last successfully used input and export folders. |
 | 📋 Proposed | [Account for physical screen sizes][upstream-11] | Scale monitor rectangles using their real-world dimensions as well as their pixel resolutions. |
-| 📋 Proposed | [Apply split wallpapers from the command line][upstream-10] | Add a CLI option that applies generated crops, matching the GUI workflow. |
+| ✅ Supported | [Apply split wallpapers from the command line][upstream-10] | The `--apply` option creates a managed set and applies it to the current Plasma activity. |
 | 📋 Proposed | [Add an "as large as possible" layout mode][upstream-8] | Offer an additional automatic image/layout scaling mode. |
 
 Completed requests and bug reports from the original project are not duplicated
@@ -25,17 +25,17 @@ here. See its [full issue history][upstream-issues] for that archival context.
 
 ### Output settings
 
-Add persistent settings for:
+Persistent settings are available for:
 
 - Default input and export folders.
 - An export filename template, with fields such as source name, screen name,
   screen number, and revision.
 - Collision handling: replace an existing set, create a new revision, or ask.
 
-The content digest currently prevents filename collisions and makes Plasma
-notice changed image content. It should remain available as a template field or
-internal revision identifier, but it does not need to appear in every
-user-facing filename.
+Exports use readable names by default and support `{source}`, `{screen}`,
+`{number}`, `{revision}`, and `{digest}` template fields. Users can replace an
+existing set, create a new set-wide revision, or be asked each time. Managed
+wallpaper crops retain content digests internally so Plasma notices changes.
 
 ### Wallpaper set library
 
@@ -44,13 +44,16 @@ a preview, source image, creation time, monitor layout, crop mapping, and the
 generated files so it can be reapplied safely. Users should be able to reapply,
 rename, and delete a set.
 
-Treat applying and exporting as separate workflows:
+Applying and exporting are separate workflows:
 
 - **Apply** writes crops and a small manifest to an application-managed data
   directory. The application owns these files and can present them as a tidy
   library instead of placing them beside the source image.
 - **Export** writes user-owned files to the configured folder using the chosen
   filename template. Exported files should not be removed automatically.
+
+Wallpaper Splitter 1.3 writes a versioned JSON manifest for each applied set.
+The viewer and lifecycle controls described above remain future work.
 
 Before deleting an applied set, the application must ensure Plasma is no longer
 referencing its files.
