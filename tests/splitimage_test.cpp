@@ -1,4 +1,5 @@
 #include <QColor>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QGraphicsTextItem>
 #include <QGraphicsView>
@@ -6,6 +7,7 @@
 #include <QGraphicsScene>
 #include <QPainter>
 #include <QProcess>
+#include <QPushButton>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
@@ -57,6 +59,7 @@ private slots:
     void screenControlsAcceptMoveAndScaleButtons();
     void emptyStateRemainsCenteredWhenWindowResizes();
     void imageRemainsFullyVisibleAcrossWindowResizes();
+    void footerControlsStayGroupedWhenWindowWidens();
     void monitorLabelRemainsCenteredAtDifferentZoomLevels();
     void validatesFilenameTemplates();
     void handlesSetWideExportCollisions();
@@ -291,6 +294,27 @@ void SplitImageTest::imageRemainsFullyVisibleAcrossWindowResizes() {
                                     .arg(windowSize.width())
                                     .arg(windowSize.height())));
     }
+}
+
+void SplitImageTest::footerControlsStayGroupedWhenWindowWidens() {
+    WallpaperSplitter splitter;
+    splitter.resize(1200, 700);
+    splitter.show();
+    QApplication::processEvents();
+
+    auto *openBox = splitter.findChild<QDialogButtonBox *>(QStringLiteral("buttonBoxOpen"));
+    auto *settings = splitter.findChild<QPushButton *>(QStringLiteral("settingsButton"));
+    auto *actions = splitter.findChild<QDialogButtonBox *>(QStringLiteral("buttonBox"));
+    QVERIFY(openBox != nullptr);
+    QVERIFY(settings != nullptr);
+    QVERIFY(actions != nullptr);
+
+    const auto *openButton = openBox->button(QDialogButtonBox::Open);
+    QVERIFY(openButton != nullptr);
+    QVERIFY(openBox->width() <= openBox->sizeHint().width());
+    QVERIFY(settings->geometry().left() - openBox->geometry().right() <= 12);
+    QVERIFY(openButton->geometry().left() <= 1);
+    QVERIFY(splitter.width() - actions->geometry().right() <= 20);
 }
 
 void SplitImageTest::monitorLabelRemainsCenteredAtDifferentZoomLevels() {
