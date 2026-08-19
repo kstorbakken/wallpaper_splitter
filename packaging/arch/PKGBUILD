@@ -1,0 +1,33 @@
+pkgname=wallpaper_splitter
+pkgver=1.3.0
+pkgrel=2
+pkgdesc='Split and span a single wallpaper across multiple screens on KDE Plasma'
+arch=('x86_64')
+url='https://github.com/kstorbakken/wallpaper_splitter'
+license=('GPL-3.0-only')
+depends=('gcc-libs' 'glibc' 'hicolor-icon-theme' 'kconfigwidgets' 'qt6-base')
+makedepends=('cmake' 'extra-cmake-modules' 'ninja')
+options=('!debug')
+
+_project_root="$(realpath "${startdir}/../..")"
+
+build() {
+    cmake \
+        -S "${_project_root}" \
+        -B "${srcdir}/build" \
+        -G Ninja \
+        -DCMAKE_BUILD_TYPE=None \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DBUILD_TESTING=ON \
+        -Wno-dev
+    cmake --build "${srcdir}/build"
+}
+
+check() {
+    ctest --test-dir "${srcdir}/build" --output-on-failure
+}
+
+package() {
+    DESTDIR="${pkgdir}" cmake --install "${srcdir}/build" --strip
+}

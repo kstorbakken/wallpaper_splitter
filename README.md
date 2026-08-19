@@ -99,6 +99,12 @@ To install it after building:
 cmake --install build
 ```
 
+An optional Arch Linux devcontainer provides the complete build environment
+used by the maintainer. It can also produce a native pacman package from the
+current working tree for installation on an Arch test host. See the
+[development environment guide](DEVELOPMENT.md) for setup, package output, and
+adapting the container to another distribution.
+
 Tagged releases provide an AppImage plus `.deb`, `.rpm`, and Arch Linux
 `.pkg.tar.zst` packages on the
 [GitHub releases page](https://github.com/kstorbakken/wallpaper_splitter/releases).

@@ -1,0 +1,23 @@
+{
+    "name": "Wallpaper Splitter (Arch Linux / Qt 6 / KF 6)",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".."
+    },
+    "remoteUser": "vscode",
+    "updateRemoteUserUID": true,
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cmake-tools",
+                "ms-vscode.cpptools"
+            ],
+            "settings": {
+                "cmake.generator": "Ninja",
+                "files.eol": "\n",
+                "files.insertFinalNewline": true,
+                "files.trimTrailingWhitespace": true
+            }
+        }
+    }
+}
