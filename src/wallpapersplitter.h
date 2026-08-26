@@ -1,17 +1,15 @@
-//
-// Created by l0drex on 15.09.21.
-//
-
 #ifndef WALLPAPER_SPLITTER_WALLPAPERSPLITTER_H
 #define WALLPAPER_SPLITTER_WALLPAPERSPLITTER_H
 
 #include <QDialog>
 #include <QFileInfo>
 #include <QGraphicsItemGroup>
+
+#include "appsettings.h"
+#include "outputservice.h"
 #include "screensitem.h"
 
 class ResizableImageItem;
-
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class WallpaperSplitter; }
@@ -36,20 +34,25 @@ private:
     Ui::WallpaperSplitter *ui;
     ScreensItem *screenGroup{};
     ResizableImageItem *imageItem{};
-    QFileInfo *imageFile;
+    QFileInfo imageFile;
+    QSize originalImageSize;
+    UserPreferences preferences;
 
     void scaleView();
-    QStringList splitImage();
+    void displayImage(const QImage &image);
+    QList<ScreenCrop> currentScreenCrops() const;
+    QString sourceName() const;
     static inline QSize totalScreenSize();
+    void showOperationError(const OperationResult &result);
 
 private slots:
     void selectImage();
     void applyWallpaper();
-    void saveWallpapers();
+    void exportWallpapers();
+    void showSettings();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
 };
 
-
-#endif //WALLPAPER_SPLITTER_WALLPAPERSPLITTER_H
+#endif

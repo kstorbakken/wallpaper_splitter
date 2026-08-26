@@ -1,10 +1,16 @@
 #include <QColor>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QGraphicsTextItem>
 #include <QGraphicsView>
 #include <QImage>
 #include <QGraphicsScene>
 #include <QPainter>
+#include <QProcess>
+#include <QPushButton>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSettings>
 #include <QScrollBar>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -13,6 +19,31 @@
 #include "resizableimageitem.h"
 #include "screensitem.h"
 #include "wallpapersplitter.h"
+#include "appsettings.h"
+#include "outputservice.h"
+#include "settingsdialog.h"
+
+namespace {
+class FakePlasmaApplicator final : public PlasmaApplicator {
+public:
+    explicit FakePlasmaApplicator(bool succeeds) : succeeds(succeeds) {}
+
+    OperationResult apply(const QList<ScreenCrop> &screens,
+                          const QStringList &paths) override {
+        called = true;
+        receivedScreens = screens;
+        receivedPaths = paths;
+        return succeeds ? OperationResult::ok(paths)
+                        : OperationResult::failure(OperationError::Plasma,
+                                                   QStringLiteral("simulated failure"));
+    }
+
+    bool succeeds;
+    bool called{false};
+    QList<ScreenCrop> receivedScreens;
+    QStringList receivedPaths;
+};
+}
 
 class SplitImageTest : public QObject {
     Q_OBJECT
@@ -28,7 +59,17 @@ private slots:
     void screenControlsAcceptMoveAndScaleButtons();
     void emptyStateRemainsCenteredWhenWindowResizes();
     void imageRemainsFullyVisibleAcrossWindowResizes();
+    void footerControlsStayGroupedWhenWindowWidens();
     void monitorLabelRemainsCenteredAtDifferentZoomLevels();
+    void validatesFilenameTemplates();
+    void handlesSetWideExportCollisions();
+    void persistsOutputSettings();
+    void outputSettingsDialogHasRoomyDefaultSize();
+    void migratesLegacySettingsToNeutralNamespace();
+    void writesManagedManifestAndRetainsFailures();
+    void reusesIdenticalManagedSet();
+    void plasmaScriptUsesDesktopGeometry();
+    void commandLineExportsAndRejectsConflicts();
 };
 
 void SplitImageTest::preservesRectangleOrderAndPixels() {
@@ -255,6 +296,27 @@ void SplitImageTest::imageRemainsFullyVisibleAcrossWindowResizes() {
     }
 }
 
+void SplitImageTest::footerControlsStayGroupedWhenWindowWidens() {
+    WallpaperSplitter splitter;
+    splitter.resize(1200, 700);
+    splitter.show();
+    QApplication::processEvents();
+
+    auto *openBox = splitter.findChild<QDialogButtonBox *>(QStringLiteral("buttonBoxOpen"));
+    auto *settings = splitter.findChild<QPushButton *>(QStringLiteral("settingsButton"));
+    auto *actions = splitter.findChild<QDialogButtonBox *>(QStringLiteral("buttonBox"));
+    QVERIFY(openBox != nullptr);
+    QVERIFY(settings != nullptr);
+    QVERIFY(actions != nullptr);
+
+    const auto *openButton = openBox->button(QDialogButtonBox::Open);
+    QVERIFY(openButton != nullptr);
+    QVERIFY(openBox->width() <= openBox->sizeHint().width());
+    QVERIFY(settings->geometry().left() - openBox->geometry().right() <= 12);
+    QVERIFY(openButton->geometry().left() <= 1);
+    QVERIFY(splitter.width() - actions->geometry().right() <= 20);
+}
+
 void SplitImageTest::monitorLabelRemainsCenteredAtDifferentZoomLevels() {
     QGraphicsScene scene;
     auto *group = new QGraphicsItemGroup();
@@ -304,6 +366,236 @@ void SplitImageTest::monitorLabelRemainsCenteredAtDifferentZoomLevels() {
         QVERIFY2(lastTextRow - firstTextRow >= 6,
                  "The monitor label was clipped vertically");
     }
+}
+
+void SplitImageTest::validatesFilenameTemplates() {
+    QVERIFY(OutputService::validateFileNameTemplate(
+            QStringLiteral("{source}-{screen}-{number}-{revision}-{digest}")).success);
+    QCOMPARE(OutputService::sanitizeFileComponent(QStringLiteral("DP/1:*?")),
+             QStringLiteral("DP_1___"));
+    QVERIFY(!OutputService::validateFileNameTemplate(QString()).success);
+    QVERIFY(!OutputService::validateFileNameTemplate(QStringLiteral("../{source}")).success);
+    QVERIFY(!OutputService::validateFileNameTemplate(QStringLiteral("{unknown}-{number}")).success);
+    QVERIFY(!OutputService::validateFileNameTemplate(QStringLiteral("{source}")).success);
+}
+
+void SplitImageTest::handlesSetWideExportCollisions() {
+    QImage source(20, 10, QImage::Format_RGB32);
+    source.fill(Qt::blue);
+    const QList<ScreenCrop> screens{
+            {QStringLiteral("DP-1"), 1, QRect(0, 0, 10, 10), QRect(0, 0, 10, 10)},
+            {QStringLiteral("HDMI-1"), 2, QRect(10, 0, 10, 10), QRect(10, 0, 10, 10)}};
+    QTemporaryDir output;
+    QVERIFY(output.isValid());
+    ExportOptions options{output.path(), QStringLiteral("{source}-{number}"),
+                          CollisionPolicy::Fail};
+
+    OperationResult result = OutputService::exportCrops(source, screens,
+                                                        QStringLiteral("lake.jpg"), options);
+    QVERIFY2(result.success, qPrintable(result.message));
+    QCOMPARE(QFileInfo(result.paths.at(0)).fileName(), QStringLiteral("lake-1.png"));
+    result = OutputService::exportCrops(source, screens, QStringLiteral("lake.jpg"), options);
+    QCOMPARE(result.error, OperationError::Collision);
+    options.collisionPolicy = CollisionPolicy::Ask;
+    result = OutputService::exportCrops(source, screens, QStringLiteral("lake.jpg"), options);
+    QCOMPARE(result.error, OperationError::Collision);
+
+    options.collisionPolicy = CollisionPolicy::Replace;
+    QVERIFY(OutputService::exportCrops(source, screens, QStringLiteral("lake.jpg"), options).success);
+    QFile unrelated(output.filePath(QStringLiteral("notes.txt")));
+    QVERIFY(unrelated.open(QIODevice::WriteOnly));
+    unrelated.write("keep");
+    unrelated.close();
+
+    options.collisionPolicy = CollisionPolicy::Revision;
+    result = OutputService::exportCrops(source, screens, QStringLiteral("lake.jpg"), options);
+    QVERIFY2(result.success, qPrintable(result.message));
+    QCOMPARE(QFileInfo(result.paths.at(0)).fileName(), QStringLiteral("lake-1-r2.png"));
+    QVERIFY(QFileInfo::exists(output.filePath(QStringLiteral("notes.txt"))));
+
+    options.fileNameTemplate = QStringLiteral("{source}{revision}-{number}");
+    result = OutputService::exportCrops(source, screens, QStringLiteral("lake.jpg"), options);
+    QVERIFY2(result.success, qPrintable(result.message));
+    QCOMPARE(QFileInfo(result.paths.at(0)).fileName(), QStringLiteral("lake-r2-1.png"));
+}
+
+void SplitImageTest::persistsOutputSettings() {
+    QTemporaryDir settingsDirectory;
+    QVERIFY(settingsDirectory.isValid());
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+                       settingsDirectory.path());
+    AppSettings::reset();
+    const UserPreferences defaults = AppSettings::load();
+    QCOMPARE(defaults.fileNameTemplate, QStringLiteral("{source}-{number}"));
+    QCOMPARE(defaults.collisionPolicy, CollisionPolicy::Ask);
+    const UserPreferences original = AppSettings::load();
+    UserPreferences expected;
+    expected.inputDirectory = QStringLiteral("/tmp/input-wallpapers");
+    expected.exportDirectory = QStringLiteral("/tmp/export-wallpapers");
+    expected.fileNameTemplate = QStringLiteral("{screen}-{number}{revision}");
+    expected.collisionPolicy = CollisionPolicy::Revision;
+    AppSettings::save(expected);
+
+    const UserPreferences actual = AppSettings::load();
+    QCOMPARE(actual.inputDirectory, expected.inputDirectory);
+    QCOMPARE(actual.exportDirectory, expected.exportDirectory);
+    QCOMPARE(actual.fileNameTemplate, expected.fileNameTemplate);
+    QCOMPARE(actual.collisionPolicy, expected.collisionPolicy);
+    AppSettings::save(original);
+}
+
+void SplitImageTest::outputSettingsDialogHasRoomyDefaultSize() {
+    SettingsDialog dialog(UserPreferences{});
+    QCOMPARE(dialog.size(), QSize(650, 360));
+    QCOMPARE(dialog.minimumSize(), QSize(560, 300));
+}
+
+void SplitImageTest::migratesLegacySettingsToNeutralNamespace() {
+    QTemporaryDir settingsDirectory;
+    QVERIFY(settingsDirectory.isValid());
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+                       settingsDirectory.path());
+
+    QSettings current(QSettings::NativeFormat, QSettings::UserScope,
+                      QStringLiteral("wallpaper-splitter"), QStringLiteral("settings"));
+    current.clear();
+    QSettings legacy(QSettings::NativeFormat, QSettings::UserScope,
+                     QStringLiteral("kstorbakken"), QStringLiteral("Wallpaper Splitter"));
+    legacy.clear();
+    legacy.setValue(QStringLiteral("folders/input"), QStringLiteral("/legacy/input"));
+    legacy.setValue(QStringLiteral("folders/export"), QStringLiteral("/legacy/export"));
+    legacy.setValue(QStringLiteral("output/fileNameTemplate"), QStringLiteral("{screen}-{number}"));
+    legacy.setValue(QStringLiteral("output/collisionPolicy"), QStringLiteral("revision"));
+    legacy.sync();
+
+    const UserPreferences migrated = AppSettings::load();
+    QCOMPARE(migrated.inputDirectory, QStringLiteral("/legacy/input"));
+    QCOMPARE(migrated.exportDirectory, QStringLiteral("/legacy/export"));
+    QCOMPARE(migrated.fileNameTemplate, QStringLiteral("{screen}-{number}"));
+    QCOMPARE(migrated.collisionPolicy, CollisionPolicy::Revision);
+    QVERIFY(current.fileName().endsWith(QStringLiteral("wallpaper-splitter/settings.conf")));
+
+    AppSettings::reset();
+    legacy.clear();
+}
+
+void SplitImageTest::writesManagedManifestAndRetainsFailures() {
+    QImage source(20, 10, QImage::Format_RGB32);
+    source.fill(Qt::green);
+    const QList<ScreenCrop> screens{
+            {QStringLiteral("DP-1"), 1, QRect(-10, 0, 10, 10), QRect(0, 0, 10, 10)},
+            {QStringLiteral("HDMI-1"), 2, QRect(0, 0, 10, 10), QRect(10, 0, 10, 10)}};
+    QTemporaryDir managedRoot;
+    QVERIFY(managedRoot.isValid());
+
+    FakePlasmaApplicator success(true);
+    OperationResult result = OutputService::applyManaged(
+            source, source.size(), screens, QStringLiteral("forest.png"),
+            QStringLiteral("/pictures/forest.png"), success, managedRoot.path());
+    QVERIFY2(result.success, qPrintable(result.message));
+    QVERIFY(success.called);
+    QVERIFY(QFileInfo::exists(result.manifestPath));
+    QFile manifestFile(result.manifestPath);
+    QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+    QJsonObject manifest = QJsonDocument::fromJson(manifestFile.readAll()).object();
+    QCOMPARE(manifest.value(QStringLiteral("schemaVersion")).toInt(), 1);
+    QCOMPARE(manifest.value(QStringLiteral("status")).toString(), QStringLiteral("applied"));
+    QCOMPARE(manifest.value(QStringLiteral("sourcePath")).toString(),
+             QStringLiteral("/pictures/forest.png"));
+    QCOMPARE(manifest.value(QStringLiteral("crops")).toArray().size(), 2);
+    manifestFile.close();
+
+    FakePlasmaApplicator failure(false);
+    result = OutputService::applyManaged(
+            source, source.size(), screens, QStringLiteral("forest.png"), {}, failure,
+            managedRoot.path());
+    QVERIFY(!result.success);
+    QCOMPARE(result.error, OperationError::Plasma);
+    QVERIFY(QFileInfo::exists(result.manifestPath));
+    manifestFile.setFileName(result.manifestPath);
+    QVERIFY(manifestFile.open(QIODevice::ReadOnly));
+    manifest = QJsonDocument::fromJson(manifestFile.readAll()).object();
+    QCOMPARE(manifest.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+    QCOMPARE(manifest.value(QStringLiteral("error")).toString(),
+             QStringLiteral("simulated failure"));
+    for (const QString &path : result.paths) QVERIFY(QFileInfo::exists(path));
+}
+
+void SplitImageTest::reusesIdenticalManagedSet() {
+    QImage source(20, 10, QImage::Format_RGB32);
+    source.fill(Qt::green);
+    const QList<ScreenCrop> screens{
+            {QStringLiteral("DP-1"), 1, QRect(-10, 0, 10, 10), QRect(0, 0, 10, 10)},
+            {QStringLiteral("HDMI-1"), 2, QRect(0, 0, 10, 10), QRect(10, 0, 10, 10)}};
+    QTemporaryDir managedRoot;
+    QVERIFY(managedRoot.isValid());
+
+    FakePlasmaApplicator applicator(true);
+    const OperationResult first = OutputService::applyManaged(
+            source, source.size(), screens, QStringLiteral("forest.png"),
+            QStringLiteral("/pictures/forest.png"), applicator, managedRoot.path());
+    QVERIFY2(first.success, qPrintable(first.message));
+    const OperationResult repeated = OutputService::applyManaged(
+            source, source.size(), screens, QStringLiteral("forest.png"),
+            QStringLiteral("/pictures/forest.png"), applicator, managedRoot.path());
+    QVERIFY2(repeated.success, qPrintable(repeated.message));
+
+    QCOMPARE(repeated.manifestPath, first.manifestPath);
+    QCOMPARE(repeated.paths, first.paths);
+    QCOMPARE(QDir(managedRoot.path()).entryList(
+                     QDir::Dirs | QDir::NoDotAndDotDot).size(), 1);
+
+    source.fill(Qt::blue);
+    const OperationResult changed = OutputService::applyManaged(
+            source, source.size(), screens, QStringLiteral("forest.png"),
+            QStringLiteral("/pictures/forest.png"), applicator, managedRoot.path());
+    QVERIFY2(changed.success, qPrintable(changed.message));
+    QVERIFY(changed.manifestPath != first.manifestPath);
+    QCOMPARE(QDir(managedRoot.path()).entryList(
+                     QDir::Dirs | QDir::NoDotAndDotDot).size(), 2);
+}
+
+void SplitImageTest::plasmaScriptUsesDesktopGeometry() {
+    const QList<ScreenCrop> screens{
+            {QStringLiteral("DP-1"), 1, QRect(-1920, 0, 1920, 1080), QRect(0, 0, 1, 1)},
+            {QStringLiteral("HDMI-1"), 2, QRect(0, -200, 2560, 1440), QRect(1, 0, 1, 1)}};
+    const QString script = DBusPlasmaApplicator::buildScript(
+            screens, {QStringLiteral("/tmp/left.png"), QStringLiteral("/tmp/right.png")});
+    QVERIFY(script.contains(QStringLiteral("\"x\":-1920")));
+    QVERIFY(script.contains(QStringLiteral("\"y\":-200")));
+    QVERIFY(script.contains(QStringLiteral("sameGeometry")));
+    QVERIFY(script.contains(QStringLiteral("/tmp/right.png")));
+    QVERIFY(script.contains(QStringLiteral("WALLPAPER_SPLITTER_RESULT")));
+}
+
+void SplitImageTest::commandLineExportsAndRejectsConflicts() {
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString sourcePath = temporary.filePath(QStringLiteral("cli-source.png"));
+    QImage source(1200, 900, QImage::Format_RGB32);
+    source.fill(Qt::cyan);
+    QVERIFY(source.save(sourcePath));
+    const QString destination = temporary.filePath(QStringLiteral("output"));
+    const QString executable = QCoreApplication::applicationDirPath()
+            + QStringLiteral("/wallpaper_splitter");
+
+    QProcess process;
+    process.setProgram(executable);
+    process.setArguments({QStringLiteral("--destination"), destination,
+                          QStringLiteral("--filename-template"), QStringLiteral("{source}-{number}"),
+                          QStringLiteral("--collision"), QStringLiteral("replace"), sourcePath});
+    process.start();
+    QVERIFY(process.waitForFinished());
+    QCOMPARE(process.exitCode(), 0);
+    QVERIFY2(!process.readAllStandardOutput().isEmpty(),
+             qPrintable(QString::fromUtf8(process.readAllStandardError())));
+    QVERIFY(QFileInfo::exists(QDir(destination).filePath(QStringLiteral("cli-source-1.png"))));
+
+    process.setArguments({QStringLiteral("--apply"), QStringLiteral("--destination"), destination,
+                          sourcePath});
+    process.start();
+    QVERIFY(process.waitForFinished());
+    QCOMPARE(process.exitCode(), 2);
 }
 
 QTEST_MAIN(SplitImageTest)

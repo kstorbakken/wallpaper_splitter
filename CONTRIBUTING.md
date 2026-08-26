@@ -2,6 +2,10 @@
 
 Thanks for helping improve Wallpaper Splitter.
 
+The build dependencies can be installed natively or supplied by the optional
+devcontainer. See [DEVELOPMENT.md](DEVELOPMENT.md) for the container workflow,
+local Arch test packages, and guidance for matching another environment.
+
 ## Development workflow
 
 1. Create a focused branch from `main`.
