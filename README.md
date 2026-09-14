@@ -28,6 +28,7 @@ This is an overview of the currently supported functionality.
 - [x] Adjust position
 - [x] Adjust scale*
 - [x] Zoom into the scene with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd>
+- [x] Pan the zoomed preview with a middle-button drag
 - [x] Command line tool
 - [x] Support drag 'n drop
 
@@ -40,7 +41,7 @@ originally filed in the original project's issue tracker.
 
 1. Click <kbd>📂 Open</kbd> to select your image.
 2. Resize or stretch the photo by dragging one of its corner handles. Hold <kbd>Shift</kbd> while dragging to preserve its aspect ratio. Adjust the position of your screens with <kbd>Left 🖱️</kbd> and the size with <kbd>Right 🖱️</kbd>.
-   You can also zoom with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd>.
+   You can also zoom with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd> and pan the zoomed preview by holding the middle mouse button and dragging.
 3. Click <kbd>Export</kbd> to save user-owned crop files, or <kbd>Apply</kbd> to
    write a managed wallpaper set and use it on the current Plasma activity.
 
