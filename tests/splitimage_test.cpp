@@ -9,6 +9,8 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QJsonDocument>
+#include <QJsonArray>
+#include <QListWidget>
 #include <QJsonObject>
 #include <QSettings>
 #include <QScrollBar>
@@ -23,6 +25,8 @@
 #include "appsettings.h"
 #include "outputservice.h"
 #include "settingsdialog.h"
+#include "setlibrary.h"
+#include "setlibrarydialog.h"
 
 namespace {
 class FakePlasmaApplicator final : public PlasmaApplicator {
@@ -39,6 +43,8 @@ public:
                                                    QStringLiteral("simulated failure"));
     }
 
+    OperationResult wallpaperReferences() override { return references; }
+    OperationResult references = OperationResult::failure(OperationError::Plasma, "unavailable");
     bool succeeds;
     bool called{false};
     QList<ScreenCrop> receivedScreens;
@@ -73,6 +79,10 @@ private slots:
     void reusesIdenticalManagedSet();
     void plasmaScriptUsesDesktopGeometry();
     void commandLineExportsAndRejectsConflicts();
+    void libraryReappliesAndPreservesMetadata();
+    void libraryRejectsUnsafeDeletion();
+    void libraryHandlesBrokenSets();
+    void libraryDialogShowsSets();
 };
 
 void SplitImageTest::preservesRectangleOrderAndPixels() {
@@ -659,6 +669,135 @@ void SplitImageTest::commandLineExportsAndRejectsConflicts() {
     process.start();
     QVERIFY(process.waitForFinished());
     QCOMPARE(process.exitCode(), 2);
+}
+
+void SplitImageTest::libraryReappliesAndPreservesMetadata() {
+    QTemporaryDir root;
+    QImage image(20, 10, QImage::Format_RGB32);
+    image.fill(Qt::red);
+    const QList<ScreenCrop> screens{{"left", 1, QRect(-10, 0, 10, 10), QRect(0, 0, 10, 10)},
+                                   {"right", 2, QRect(0, 0, 10, 10), QRect(10, 0, 10, 10)}};
+    FakePlasmaApplicator plasma(true);
+    QVERIFY(OutputService::applyManaged(image, image.size(), screens, "red.png", "/missing/red.png",
+                                        plasma, root.path()).success);
+    SetLibrary library(root.path());
+    auto set = library.sets().first();
+    const auto createdAt = set.manifest.value("createdAt");
+    QVERIFY(library.rename(set.id, "Evening").success);
+    QVERIFY(!library.rename(set.id, "  ").success);
+    QVERIFY(OutputService::applyManaged(image, image.size(), screens, "red.png", "/missing/red.png",
+                                        plasma, root.path()).success);
+    set = library.sets().first();
+    QCOMPARE(set.name, "Evening");
+    QCOMPARE(set.manifest.value("createdAt"), createdAt);
+    plasma.called = false;
+    QVERIFY(!library.reapply(set.id, {QRect(0, 0, 20, 10)}, plasma).success);
+    QVERIFY(!plasma.called);
+    QVERIFY(library.reapply(set.id, {screens[1].desktopGeometry, screens[0].desktopGeometry}, plasma).success);
+    QCOMPARE(plasma.receivedPaths, set.paths);
+    const auto preview = SetLibrary::preview(set, QSize(200, 100));
+    QCOMPARE(preview.pixelColor(50, 50), QColor(Qt::red));
+    plasma.succeeds = false;
+    QVERIFY(!library.reapply(set.id, {screens[0].desktopGeometry, screens[1].desktopGeometry}, plasma).success);
+    QCOMPARE(library.sets().first().manifest.value("status").toString(), "failed");
+    QVERIFY(QFile::remove(set.paths.first()));
+    plasma.called = false;
+    QVERIFY(!library.reapply(set.id, {screens[0].desktopGeometry, screens[1].desktopGeometry}, plasma).success);
+    QVERIFY(!plasma.called);
+}
+
+void SplitImageTest::libraryRejectsUnsafeDeletion() {
+    QTemporaryDir root;
+    QImage image(10, 10, QImage::Format_RGB32);
+    image.fill(Qt::blue);
+    FakePlasmaApplicator plasma(true);
+    const auto applied = OutputService::applyManaged(image, image.size(),
+        {{"screen", 1, image.rect(), image.rect()}}, "blue.png", {}, plasma, root.path());
+    QVERIFY(applied.success);
+    SetLibrary library(root.path());
+    const auto set = library.sets().first();
+    QVERIFY(!library.remove(set.id, plasma).success); // Unknown Plasma state fails closed.
+    QVERIFY(QFileInfo::exists(applied.paths.first()));
+    plasma.references = OperationResult::ok({QUrl::fromLocalFile(applied.paths.first()).toString()});
+    QVERIFY(!library.remove(set.id, plasma).success);
+    plasma.references = OperationResult::ok({root.path()}); // Slideshow parent directory.
+    QVERIFY(!library.remove(set.id, plasma).success);
+    plasma.references = OperationResult::ok();
+    QFile extra(QDir(set.directory).filePath("user-export.png"));
+    QVERIFY(extra.open(QIODevice::WriteOnly));
+    extra.write("keep me");
+    extra.close();
+    QVERIFY(!library.remove(set.id, plasma).success);
+    QVERIFY(extra.remove());
+    QVERIFY(library.remove(set.id, plasma).success);
+    QVERIFY(!QFileInfo::exists(set.directory));
+}
+
+void SplitImageTest::libraryHandlesBrokenSets() {
+    QTemporaryDir root;
+    QImage image(10, 10, QImage::Format_RGB32);
+    image.fill(Qt::green);
+    FakePlasmaApplicator plasma(true);
+    const auto applied = OutputService::applyManaged(image, image.size(),
+        {{"screen", 1, image.rect(), image.rect()}}, "green.png", {}, plasma, root.path());
+    QVERIFY(applied.success);
+    SetLibrary library(root.path());
+    auto set = library.sets().first();
+    auto manifest = set.manifest;
+    auto crops = manifest.value("crops").toArray();
+    auto crop = crops.first().toObject();
+    crop.insert("path", "../outside.png");
+    crops[0] = crop;
+    manifest.insert("crops", crops);
+    QFile file(applied.manifestPath);
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write(QJsonDocument(manifest).toJson());
+    file.close();
+    QVERIFY(!library.sets().first().problem.isEmpty());
+    plasma.references = OperationResult::ok();
+    QVERIFY(!library.remove(set.id, plasma).success);
+    QVERIFY(!library.rename(set.id, "changed").success);
+    QVERIFY(!library.load("../outside", &set).success);
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write("{ broken");
+    file.close();
+    QCOMPARE(library.sets().size(), 1);
+    QVERIFY(!library.sets().first().problem.isEmpty());
+
+    // Future schemas stay visible but cannot be modified.
+    manifest = QJsonObject{{"schemaVersion", 99}, {"id", QFileInfo(applied.manifestPath).dir().dirName()}};
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write(QJsonDocument(manifest).toJson());
+    file.close();
+    QVERIFY(!library.sets().first().problem.isEmpty());
+    QVERIFY(!library.remove(manifest.value("id").toString(), plasma).success);
+
+    // Restore the set, then replace one crop with a symlink to user-owned data.
+    QVERIFY(OutputService::applyManaged(image, image.size(),
+        {{"screen", 1, image.rect(), image.rect()}}, "green.png", {}, plasma, root.path()).success);
+    const QString outside = root.filePath("source.png");
+    QVERIFY(image.save(outside));
+    QVERIFY(QFile::remove(applied.paths.first()));
+    QVERIFY(QFile::link(outside, applied.paths.first()));
+    set = library.sets().first();
+    QVERIFY(!set.problem.isEmpty());
+    QVERIFY(!library.remove(set.id, plasma).success);
+    QVERIFY(QFileInfo::exists(outside));
+}
+
+void SplitImageTest::libraryDialogShowsSets() {
+    QTemporaryDir root;
+    SetLibraryDialog empty(nullptr, root.path());
+    QCOMPARE(empty.findChild<QListWidget *>("setList")->count(), 0);
+    QImage image(10, 10, QImage::Format_RGB32);
+    image.fill(Qt::green);
+    FakePlasmaApplicator plasma(true);
+    QVERIFY(OutputService::applyManaged(image, image.size(),
+        {{"screen", 1, image.rect(), image.rect()}}, "green.png", {}, plasma, root.path()).success);
+    SetLibraryDialog populated(nullptr, root.path());
+    auto *list = populated.findChild<QListWidget *>("setList");
+    QCOMPARE(list->count(), 1);
+    QCOMPARE(list->currentItem()->text(), "green.png");
 }
 
 QTEST_MAIN(SplitImageTest)

@@ -2,6 +2,7 @@
 #define WALLPAPER_SPLITTER_OUTPUTSERVICE_H
 
 #include <QImage>
+#include <QObject>
 #include <QList>
 #include <QRect>
 #include <QSize>
@@ -52,6 +53,10 @@ struct ExportOptions {
 class PlasmaApplicator {
 public:
     virtual ~PlasmaApplicator() = default;
+    virtual OperationResult wallpaperReferences() {
+        return OperationResult::failure(OperationError::Plasma,
+                                         QObject::tr("Plasma wallpaper references could not be checked."));
+    }
     virtual OperationResult apply(const QList<ScreenCrop> &screens,
                                   const QStringList &paths) = 0;
 };
@@ -60,6 +65,7 @@ class DBusPlasmaApplicator final : public PlasmaApplicator {
 public:
     OperationResult apply(const QList<ScreenCrop> &screens,
                           const QStringList &paths) override;
+    OperationResult wallpaperReferences() override;
     static QString buildScript(const QList<ScreenCrop> &screens,
                                const QStringList &paths);
 };

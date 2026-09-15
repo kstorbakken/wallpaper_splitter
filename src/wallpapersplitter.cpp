@@ -11,6 +11,7 @@
 #include "graphicsview.h"
 #include "resizableimageitem.h"
 #include "settingsdialog.h"
+#include "setlibrarydialog.h"
 #include "ui_wallpapersplitter.h"
 
 WallpaperSplitter::WallpaperSplitter(QWidget *parent)
@@ -40,6 +41,13 @@ WallpaperSplitter::WallpaperSplitter(QWidget *parent)
             this, &WallpaperSplitter::selectImage);
     connect(applyButton, &QPushButton::pressed, this, &WallpaperSplitter::applyWallpaper);
     connect(exportButton, &QPushButton::pressed, this, &WallpaperSplitter::exportWallpapers);
+    auto *libraryButton = new QPushButton(tr("Library…"), this);
+    libraryButton->setObjectName("libraryButton");
+    ui->horizontalLayout_2->insertWidget(2, libraryButton);
+    connect(libraryButton, &QPushButton::clicked, this, [this] {
+        SetLibraryDialog dialog(this);
+        dialog.exec();
+    });
     connect(ui->settingsButton, &QPushButton::pressed, this, &WallpaperSplitter::showSettings);
     connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 }

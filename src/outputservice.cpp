@@ -13,6 +13,8 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QSet>
+#include <KConfig>
+#include <KConfigGroup>
 
 #include <algorithm>
 #include <utility>
@@ -341,19 +343,27 @@ OperationResult OutputService::applyManaged(const QImage &image,
     }
 
     const QString manifestPath = QDir(setDirectory).filePath(QStringLiteral("manifest.json"));
-    const QString createdAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
-    result = writeJson(managedManifest(setId, createdAt, QStringLiteral("prepared"), {},
-                                       sourceName, sourcePath, originalSize, image.size(),
-                                       artifacts, relativePaths), manifestPath);
+    QJsonObject previous;
+    QFile previousFile(manifestPath);
+    if (previousFile.open(QIODevice::ReadOnly))
+        previous = QJsonDocument::fromJson(previousFile.readAll()).object();
+    const QString createdAt = previous.value("createdAt").toString(
+            QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    auto manifest = managedManifest(setId, createdAt, QStringLiteral("prepared"), {},
+                                    sourceName, sourcePath, originalSize, image.size(),
+                                    artifacts, relativePaths);
+    if (previous.contains("name")) manifest.insert("name", previous.value("name"));
+    result = writeJson(manifest, manifestPath);
     if (!result.success) return OperationResult::failure(result.error, result.message, paths, manifestPath);
 
     QList<ScreenCrop> correctedScreens;
     for (const CropArtifact &artifact : artifacts) correctedScreens.append(artifact.screen);
     OperationResult applyResult = applicator.apply(correctedScreens, paths);
     const QString status = applyResult.success ? QStringLiteral("applied") : QStringLiteral("failed");
-    const OperationResult manifestResult = writeJson(
-            managedManifest(setId, createdAt, status, applyResult.message, sourceName, sourcePath,
-                            originalSize, image.size(), artifacts, relativePaths), manifestPath);
+    manifest.insert("status", status);
+    manifest.insert("lastAppliedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    if (!applyResult.success) manifest.insert("error", applyResult.message);
+    const OperationResult manifestResult = writeJson(manifest, manifestPath);
     if (!manifestResult.success) {
         return OperationResult::failure(manifestResult.error, manifestResult.message, paths, manifestPath);
     }
@@ -423,6 +433,7 @@ function sameGeometry(crop, geometry) {
     return crop.x === geometry.x && crop.y === geometry.y
         && crop.width === geometry.width && crop.height === geometry.height;
 }
+const targets = [];
 for (const desktop of desktopsForActivity(currentActivity())) {
     if (desktop.screen < 0) continue;
     const geometry = screenGeometry(desktop.screen);
@@ -431,10 +442,17 @@ for (const desktop of desktopsForActivity(currentActivity())) {
         unmatchedDesktops++;
         continue;
     }
+    targets.push({desktop, crop});
+}
+// Validate the entire activity before changing any desktop.
+if (unmatchedDesktops === 0 && targets.length === crops.length
+    && new Set(targets.map(target => target.crop)).size === crops.length) {
+  for (const {desktop, crop} of targets) {
     desktop.wallpaperPlugin = 'org.kde.image';
     desktop.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
     desktop.writeConfig('Image', crop.path);
     applied++;
+  }
 }
 print('WALLPAPER_SPLITTER_RESULT ' + JSON.stringify({applied, expected: crops.length,
                                                      unmatchedDesktops}));
@@ -477,5 +495,57 @@ OperationResult DBusPlasmaApplicator::apply(const QList<ScreenCrop> &screens,
                 QObject::tr("Plasma applied %1 of %2 crops; %3 desktop(s) had no matching geometry.")
                         .arg(applied).arg(expected).arg(unmatched));
     }
+    return OperationResult::ok(paths);
+}
+
+OperationResult DBusPlasmaApplicator::wallpaperReferences() {
+    // Read live containments first; persisted config also covers stopped activities
+    // and disconnected monitors. Keep references even for inactive plugins.
+    QDBusMessage message = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.plasmashell"), QStringLiteral("/PlasmaShell"),
+            QStringLiteral("org.kde.PlasmaShell"), QStringLiteral("evaluateScript"));
+    message.setArguments({QStringLiteral(R"(
+const references = [];
+for (const desktop of desktops()) {
+    desktop.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
+    references.push(desktop.readConfig('Image', ''));
+    desktop.currentConfigGroup = ['Wallpaper', 'org.kde.slideshow', 'General'];
+    references.push(desktop.readConfig('Image', ''));
+    for (const path of desktop.readConfig('SlidePaths', [])) references.push(path);
+}
+print('WALLPAPER_SPLITTER_REFERENCES ' + JSON.stringify(references));
+)")});
+    const auto reply = QDBusConnection::sessionBus().call(message);
+    const QString output = reply.arguments().isEmpty() ? QString() : reply.arguments().first().toString();
+    const auto match = QRegularExpression(
+            QStringLiteral(R"(WALLPAPER_SPLITTER_REFERENCES (\[[^\r\n]*\]))")).match(output);
+    QJsonParseError parseError;
+    const auto document = QJsonDocument::fromJson(match.captured(1).toUtf8(), &parseError);
+    if (reply.type() == QDBusMessage::ErrorMessage || !match.hasMatch()
+        || parseError.error != QJsonParseError::NoError || !document.isArray())
+        return OperationResult::failure(OperationError::Plasma,
+            QObject::tr("Could not verify Plasma wallpaper references. The set was not deleted."));
+    QStringList paths;
+    for (const auto &value : document.array()) {
+        if (!value.isString())
+            return OperationResult::failure(OperationError::Plasma,
+                    QObject::tr("Plasma returned an unknown wallpaper reference."));
+        if (!value.toString().isEmpty()) paths.append(value.toString());
+    }
+    const QString configPath = QStandardPaths::locate(QStandardPaths::GenericConfigLocation,
+                                                      "plasma-org.kde.plasma.desktop-appletsrc");
+    QFile configFile(configPath);
+    if (configPath.isEmpty() || !configFile.open(QIODevice::ReadOnly))
+        return OperationResult::failure(OperationError::Plasma,
+                QObject::tr("Could not read saved Plasma wallpaper references. The set was not deleted."));
+    KConfig config(configPath, KConfig::SimpleConfig);
+    const auto collect = [&paths](const auto &self, const KConfigGroup &group) -> void {
+        for (const auto &key : group.keyList()) {
+            if (key == "Image") paths.append(group.readPathEntry(key, QString()));
+            if (key == "SlidePaths") paths.append(group.readPathEntry(key, QStringList()));
+        }
+        for (const auto &name : group.groupList()) self(self, group.group(name));
+    };
+    for (const auto &name : config.groupList()) collect(collect, config.group(name));
     return OperationResult::ok(paths);
 }
