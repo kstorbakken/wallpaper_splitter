@@ -16,6 +16,7 @@
 #include <QtTest>
 
 #include "centeredtextitem.h"
+#include "graphicsview.h"
 #include "resizableimageitem.h"
 #include "screensitem.h"
 #include "wallpapersplitter.h"
@@ -57,6 +58,8 @@ private slots:
     void resizeStopsAtOppositeCorner();
     void resizeCannotExposeMonitorLayout();
     void screenControlsAcceptMoveAndScaleButtons();
+    void middleButtonPansPreview_data();
+    void middleButtonPansPreview();
     void emptyStateRemainsCenteredWhenWindowResizes();
     void imageRemainsFullyVisibleAcrossWindowResizes();
     void footerControlsStayGroupedWhenWindowWidens();
@@ -239,6 +242,66 @@ void SplitImageTest::screenControlsAcceptMoveAndScaleButtons() {
 
     QVERIFY(screens->acceptedMouseButtons().testFlag(Qt::LeftButton));
     QVERIFY(screens->acceptedMouseButtons().testFlag(Qt::RightButton));
+}
+
+void SplitImageTest::middleButtonPansPreview_data() {
+    QTest::addColumn<qreal>("zoom");
+    QTest::newRow("zoomed-out") << qreal(0.5);
+    QTest::newRow("native") << qreal(1);
+    QTest::newRow("zoomed-in") << qreal(2);
+}
+
+void SplitImageTest::middleButtonPansPreview() {
+    QFETCH(qreal, zoom);
+    QGraphicsScene scene;
+    // A translated scene catches accidental use of scene coordinates as deltas.
+    auto *item = scene.addRect(QRectF(-2000, -1000, 4000, 3000));
+    item->setFlag(QGraphicsItem::ItemIsMovable);
+    GraphicsView view;
+    view.setScene(&scene);
+    view.resize(400, 300);
+    view.scale(zoom, zoom);
+    view.show();
+    QApplication::processEvents();
+    view.centerOn(100, 200);
+
+    QWidget *viewport = view.viewport();
+    const QPoint start = viewport->rect().center();
+    const QPointF scenePoint = view.mapToScene(start);
+    const auto originalTransform = view.transform();
+    const auto originalAnchor = view.transformationAnchor();
+    const auto originalCursor = view.cursor().shape();
+    auto move = [&](const QPoint &position, Qt::MouseButtons buttons) {
+        QMouseEvent event(QEvent::MouseMove, QPointF(position),
+                          QPointF(viewport->mapToGlobal(position)),
+                          Qt::NoButton, buttons, Qt::NoModifier);
+        QApplication::sendEvent(viewport, &event);
+    };
+
+    QTest::mousePress(viewport, Qt::MiddleButton, Qt::NoModifier, start);
+    QCOMPARE(view.cursor().shape(), Qt::ClosedHandCursor);
+    const QPoint first = start + QPoint(35, -20);
+    move(first, Qt::MiddleButton);
+    QCOMPARE(view.mapFromScene(scenePoint), first);
+    const QPoint second = first + QPoint(-10, 30);
+    move(second, Qt::MiddleButton);
+    QCOMPARE(view.mapFromScene(scenePoint), second);
+    QCOMPARE(item->pos(), QPointF());
+    QCOMPARE(view.transform(), originalTransform);
+    QCOMPARE(view.transformationAnchor(), originalAnchor);
+
+    // Hitting the scene edge must not create a dead zone when reversing.
+    view.horizontalScrollBar()->setValue(view.horizontalScrollBar()->minimum());
+    move(second + QPoint(10, 0), Qt::MiddleButton);
+    QCOMPARE(view.horizontalScrollBar()->value(), view.horizontalScrollBar()->minimum());
+    move(second + QPoint(5, 0), Qt::MiddleButton);
+    QCOMPARE(view.horizontalScrollBar()->value(), view.horizontalScrollBar()->minimum() + 5);
+
+    QTest::mouseRelease(viewport, Qt::MiddleButton, Qt::NoModifier, second + QPoint(5, 0));
+    QCOMPARE(view.cursor().shape(), originalCursor);
+    const QPointF centerAfterRelease = view.mapToScene(start);
+    move(start, Qt::NoButton);
+    QCOMPARE(view.mapToScene(start), centerAfterRelease);
 }
 
 void SplitImageTest::emptyStateRemainsCenteredWhenWindowResizes() {

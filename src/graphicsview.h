@@ -18,6 +18,7 @@ public:
 private:
     WallpaperSplitter* parent;
     QPoint lastCursorPosition;
+    bool panning{false};
 
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;

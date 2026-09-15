@@ -8,6 +8,7 @@
 #include <QDebug>
 #include <QImageReader>
 #include <QMimeDatabase>
+#include <QScrollBar>
 #include "graphicsview.h"
 
 GraphicsView::GraphicsView(WallpaperSplitter *parent) : QGraphicsView(parent) {
@@ -42,28 +43,42 @@ void GraphicsView::wheelEvent(QWheelEvent *event) {
 }
 
 void GraphicsView::mousePressEvent(QMouseEvent *event) {
-    if (event->button() == Qt::MiddleButton) {
-        setCursor(Qt::DragMoveCursor);
+    if (panning) {
+        event->accept();
+        return;
+    }
+    if (event->button() == Qt::MiddleButton && event->buttons() == Qt::MiddleButton) {
+        panning = true;
+        setCursor(Qt::ClosedHandCursor);
         lastCursorPosition = event->pos();
         event->accept();
+        return;
     }
     QGraphicsView::mousePressEvent(event);
 }
 
 void GraphicsView::mouseMoveEvent(QMouseEvent *event) {
-    if (false && event->buttons() == Qt::MiddleButton) {
-        // FIXME scene is always moved from the top left corner
-        setTransformationAnchor(NoAnchor);
-        const auto movement = mapToScene(event->pos() - lastCursorPosition);
-        qDebug() << movement;
-        translate(movement.x(), movement.y());
+    if (panning && event->buttons().testFlag(Qt::MiddleButton)) {
+        // Scrollbar values use viewport pixels, so the scene follows the hand
+        // at the same speed regardless of zoom or the scene's origin.
+        const QPoint movement = event->pos() - lastCursorPosition;
+        lastCursorPosition = event->pos();
+        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - movement.x());
+        verticalScrollBar()->setValue(verticalScrollBar()->value() - movement.y());
         event->accept();
     } else
         QGraphicsView::mouseMoveEvent(event);
 }
 
 void GraphicsView::mouseReleaseEvent(QMouseEvent *event) {
-    unsetCursor();
+    if (panning) {
+        if (event->button() == Qt::MiddleButton) {
+            panning = false;
+            unsetCursor();
+        }
+        event->accept();
+        return;
+    }
     QGraphicsView::mouseReleaseEvent(event);
 }
 
