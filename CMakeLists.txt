@@ -20,6 +20,7 @@ find_package(Qt6 REQUIRED COMPONENTS
 qt_standard_project_setup()
 
 find_package(KF6ConfigWidgets REQUIRED)
+find_package(KF6Config REQUIRED)
 
 qt_add_executable(wallpaper_splitter
         src/main.cpp
@@ -32,6 +33,8 @@ qt_add_executable(wallpaper_splitter
         src/outputservice.cpp
         src/appsettings.cpp
         src/settingsdialog.cpp
+        src/setlibrary.cpp
+        src/setlibrarydialog.cpp
 )
 
 target_link_libraries(wallpaper_splitter PRIVATE
@@ -40,6 +43,7 @@ target_link_libraries(wallpaper_splitter PRIVATE
         Qt6::Gui
         Qt6::Widgets
         KF6::ConfigWidgets
+        KF6::ConfigCore
 )
 
 target_compile_definitions(wallpaper_splitter PRIVATE
@@ -102,7 +106,9 @@ if(BUILD_TESTING)
     target_sources(splitimage_test PRIVATE
             src/outputservice.cpp
             src/appsettings.cpp
-            src/settingsdialog.cpp)
+            src/settingsdialog.cpp
+            src/setlibrary.cpp
+            src/setlibrarydialog.cpp)
     target_include_directories(splitimage_test PRIVATE src)
     target_link_libraries(splitimage_test PRIVATE
             Qt6::Core
@@ -110,7 +116,8 @@ if(BUILD_TESTING)
             Qt6::Gui
             Qt6::Test
             Qt6::Widgets
-            KF6::ConfigWidgets)
+            KF6::ConfigWidgets
+            KF6::ConfigCore)
     add_test(NAME splitimage_test COMMAND splitimage_test)
     set_tests_properties(splitimage_test PROPERTIES
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

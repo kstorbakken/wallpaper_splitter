@@ -24,6 +24,7 @@ This is an overview of the currently supported functionality.
 - [x] Apply the wallpaper from within the application
 - [x] Apply the wallpaper from the command line
 - [x] Export with configurable filenames and collision handling
+- [x] Browse, reapply, rename, and delete saved wallpaper sets
 - [x] Remember input and export folders
 - [x] Adjust position
 - [x] Adjust scale*
@@ -48,6 +49,14 @@ Use <kbd>Settings…</kbd> to choose the remembered input and export folders, th
 export filename template, and what happens when an export already exists.
 Templates support `{source}`, `{screen}`, `{number}`, `{revision}`, and
 `{digest}`.
+
+Use <kbd>Library…</kbd> to browse applied sets, with a preview, source image path,
+creation time, monitor layout, crop mappings, and generated file paths. Reapply
+requires the saved monitor positions and resolutions to match the current layout;
+the original source image is not needed. Renaming changes the library label.
+Deletion removes only managed files and is blocked while Plasma references a set
+on any activity, or when those references cannot be checked. Switch those activities
+to another wallpaper before deleting. Exports and source images are kept.
 
 Preferences follow the XDG base-directory convention and are stored in
 `~/.config/wallpaper-splitter/settings.conf`. Existing preferences from older

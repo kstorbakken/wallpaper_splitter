@@ -39,10 +39,9 @@ wallpaper crops retain content digests internally so Plasma notices changes.
 
 ### Wallpaper set library
 
-Add a viewer for previously generated wallpaper sets. Each entry should include
-a preview, source image, creation time, monitor layout, crop mapping, and the
-generated files so it can be reapplied safely. Users should be able to reapply,
-rename, and delete a set.
+The **Library…** viewer lists managed wallpaper sets with a preview, source image
+path, creation time, monitor layout, crop mappings, and generated files. Sets can
+be reapplied to a matching monitor layout, renamed, and deleted.
 
 Applying and exporting are separate workflows:
 
@@ -52,11 +51,11 @@ Applying and exporting are separate workflows:
 - **Export** writes user-owned files to the configured folder using the chosen
   filename template. Exported files should not be removed automatically.
 
-Wallpaper Splitter 1.3 writes a versioned JSON manifest for each applied set.
-The viewer and lifecycle controls described above remain future work.
-
-Before deleting an applied set, the application must ensure Plasma is no longer
-referencing its files.
+The library reads the versioned JSON manifests introduced in Wallpaper Splitter
+1.3. Before deletion, it checks live and saved Plasma wallpaper references,
+including other activities and disconnected monitors. If references cannot be
+checked or still use the set, deletion is blocked. Source images and exports
+remain user-owned.
 
 ### Source image plus crop mappings
 
