@@ -49,6 +49,9 @@ originally filed in the original project's issue tracker.
 
 Use <kbd>Settings…</kbd> to choose the remembered input and export folders, the
 export filename template, and what happens when an export already exists.
+Uncheck **Close the app after successfully applying a wallpaper set** to keep
+the window open for further adjustments after Apply. This preference is remembered;
+closing after Apply is enabled by default.
 Templates support `{source}`, `{screen}`, `{number}`, `{revision}`, and
 `{digest}`.
 

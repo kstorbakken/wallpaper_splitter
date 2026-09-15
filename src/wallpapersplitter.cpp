@@ -182,7 +182,7 @@ void WallpaperSplitter::applyWallpaper() {
         showOperationError(result);
         return;
     }
-    accept();
+    if (preferences.closeAfterApply) accept();
 }
 
 void WallpaperSplitter::showSettings() {

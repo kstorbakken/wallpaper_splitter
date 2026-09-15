@@ -43,6 +43,7 @@ UserPreferences AppSettings::load() {
     QSettings settings = userSettings();
     migrateLegacySettings(settings);
     UserPreferences preferences;
+    preferences.closeAfterApply = settings.value(QStringLiteral("behavior/closeAfterApply"), true).toBool();
     preferences.inputDirectory = settings.value(QStringLiteral("folders/input"), picturesDirectory()).toString();
     preferences.exportDirectory = settings.value(QStringLiteral("folders/export"), picturesDirectory()).toString();
     preferences.fileNameTemplate = settings.value(QStringLiteral("output/fileNameTemplate"),
@@ -59,6 +60,7 @@ UserPreferences AppSettings::load() {
 void AppSettings::save(const UserPreferences &preferences) {
     QSettings settings = userSettings();
     migrateLegacySettings(settings);
+    settings.setValue(QStringLiteral("behavior/closeAfterApply"), preferences.closeAfterApply);
     settings.setValue(QStringLiteral("folders/input"), preferences.inputDirectory);
     settings.setValue(QStringLiteral("folders/export"), preferences.exportDirectory);
     settings.setValue(QStringLiteral("output/fileNameTemplate"), preferences.fileNameTemplate);
@@ -71,6 +73,7 @@ void AppSettings::reset() {
     migrateLegacySettings(settings);
     settings.remove(QStringLiteral("folders"));
     settings.remove(QStringLiteral("output"));
+    settings.remove(QStringLiteral("behavior"));
 }
 
 MonitorPreferences AppSettings::loadMonitors() {

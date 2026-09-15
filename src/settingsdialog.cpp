@@ -1,6 +1,7 @@
 #include "settingsdialog.h"
 
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -39,7 +40,7 @@ QString picturesDirectory() {
 
 SettingsDialog::SettingsDialog(const UserPreferences &preferences, QWidget *parent)
         : QDialog(parent) {
-    setWindowTitle(tr("Output Settings"));
+    setWindowTitle(tr("Settings"));
     resize(650, 360);
     setMinimumSize(560, 300);
     auto *layout = new QVBoxLayout(this);
@@ -59,6 +60,10 @@ SettingsDialog::SettingsDialog(const UserPreferences &preferences, QWidget *pare
                                "{revision} appears in the template."), this);
     help->setWordWrap(true);
     layout->addWidget(help);
+    closeAfterApply = new QCheckBox(tr("Close the app after successfully applying a wallpaper set"), this);
+    closeAfterApply->setObjectName(QStringLiteral("closeAfterApply"));
+    closeAfterApply->setChecked(preferences.closeAfterApply);
+    layout->addWidget(closeAfterApply);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel
                                         | QDialogButtonBox::RestoreDefaults, this);
@@ -78,6 +83,7 @@ SettingsDialog::SettingsDialog(const UserPreferences &preferences, QWidget *pare
 
 UserPreferences SettingsDialog::preferences() const {
     UserPreferences result;
+    result.closeAfterApply = closeAfterApply->isChecked();
     result.inputDirectory = inputDirectory->text().trimmed();
     result.exportDirectory = exportDirectory->text().trimmed();
     result.fileNameTemplate = fileNameTemplate->text();
@@ -103,6 +109,7 @@ void SettingsDialog::accept() {
 }
 
 void SettingsDialog::resetDefaults() {
+    closeAfterApply->setChecked(true);
     inputDirectory->setText(picturesDirectory());
     exportDirectory->setText(picturesDirectory());
     fileNameTemplate->setText(QStringLiteral("{source}-{number}"));

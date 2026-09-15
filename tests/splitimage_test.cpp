@@ -511,10 +511,12 @@ void SplitImageTest::persistsOutputSettings() {
                        settingsDirectory.path());
     AppSettings::reset();
     const UserPreferences defaults = AppSettings::load();
+    QVERIFY(defaults.closeAfterApply);
     QCOMPARE(defaults.fileNameTemplate, QStringLiteral("{source}-{number}"));
     QCOMPARE(defaults.collisionPolicy, CollisionPolicy::Ask);
     const UserPreferences original = AppSettings::load();
     UserPreferences expected;
+    expected.closeAfterApply = false;
     expected.inputDirectory = QStringLiteral("/tmp/input-wallpapers");
     expected.exportDirectory = QStringLiteral("/tmp/export-wallpapers");
     expected.fileNameTemplate = QStringLiteral("{screen}-{number}{revision}");
@@ -522,10 +524,13 @@ void SplitImageTest::persistsOutputSettings() {
     AppSettings::save(expected);
 
     const UserPreferences actual = AppSettings::load();
+    QVERIFY(!actual.closeAfterApply);
     QCOMPARE(actual.inputDirectory, expected.inputDirectory);
     QCOMPARE(actual.exportDirectory, expected.exportDirectory);
     QCOMPARE(actual.fileNameTemplate, expected.fileNameTemplate);
     QCOMPARE(actual.collisionPolicy, expected.collisionPolicy);
+    AppSettings::reset();
+    QVERIFY(AppSettings::load().closeAfterApply);
     AppSettings::save(original);
 }
 

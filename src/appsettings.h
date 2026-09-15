@@ -5,6 +5,7 @@
 #include "monitorlayout.h"
 
 struct UserPreferences {
+    bool closeAfterApply{true};
     QString inputDirectory;
     QString exportDirectory;
     QString fileNameTemplate{QStringLiteral("{source}-{number}")};
