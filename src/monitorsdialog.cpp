@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStyle>
 #include <QSignalBlocker>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -96,7 +97,9 @@ MonitorsDialog::MonitorsDialog(const QList<MonitorInfo> &monitors,
     note->setWordWrap(true);
     layout->addWidget(note);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    auto *guide = buttons->addButton(tr("How to line up monitors…"), QDialogButtonBox::HelpRole);
+    auto *guide = buttons->addButton(tr("How to line up monitors"), QDialogButtonBox::HelpRole);
+    guide->setIcon(QIcon::fromTheme(QStringLiteral("help-contextual"),
+                                   style()->standardIcon(QStyle::SP_DialogHelpButton)));
     connect(guide, &QPushButton::clicked, this, [this] {
         QMessageBox help(this);
         help.setWindowTitle(tr("Lining Up Wallpapers"));

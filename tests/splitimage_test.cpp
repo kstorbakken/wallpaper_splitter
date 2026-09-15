@@ -397,7 +397,20 @@ void SplitImageTest::footerControlsStayGroupedWhenWindowWidens() {
     const auto *openButton = openBox->button(QDialogButtonBox::Open);
     QVERIFY(openButton != nullptr);
     QVERIFY(openBox->width() <= openBox->sizeHint().width());
-    QVERIFY(settings->geometry().left() - openBox->geometry().right() <= 12);
+    auto *library = splitter.findChild<QPushButton *>(QStringLiteral("libraryButton"));
+
+    auto *view = splitter.findChild<QGraphicsView *>();
+    auto *exportButton = splitter.findChild<QPushButton *>(QStringLiteral("exportButton"));
+    QVERIFY(library && view && exportButton);
+    QVERIFY(library->geometry().left() - openBox->geometry().right() <= 12);
+    QVERIFY(settings->geometry().left() - library->geometry().right() <= 12);
+    QVERIFY(openBox->geometry().top() > view->geometry().bottom());
+    QVERIFY(actions->geometry().top() > view->geometry().bottom());
+    QVERIFY(exportButton->geometry().right() < actions->geometry().left());
+    QVERIFY(actions->geometry().left() - exportButton->geometry().right() <= 12);
+    QVERIFY(settings->menu() != nullptr);
+    QVERIFY(actions->button(QDialogButtonBox::Cancel) == nullptr);
+    QVERIFY(actions->button(QDialogButtonBox::Ok)->isDefault());
     QVERIFY(openButton->geometry().left() <= 1);
     QVERIFY(splitter.width() - actions->geometry().right() <= 20);
 }

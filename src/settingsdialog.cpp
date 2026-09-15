@@ -10,6 +10,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStyle>
 #include <QStandardPaths>
 #include <QVBoxLayout>
 
@@ -19,7 +20,9 @@ QWidget *directoryRow(QLineEdit **editor, QWidget *parent) {
     auto *layout = new QHBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
     *editor = new QLineEdit(container);
-    auto *browse = new QPushButton(QObject::tr("Browse…"), container);
+    auto *browse = new QPushButton(QObject::tr("Browse"), container);
+    browse->setIcon(QIcon::fromTheme(QStringLiteral("folder-open"),
+                                    container->style()->standardIcon(QStyle::SP_DialogOpenButton)));
     layout->addWidget(*editor);
     layout->addWidget(browse);
     QObject::connect(browse, &QPushButton::clicked, container, [editor, container] {

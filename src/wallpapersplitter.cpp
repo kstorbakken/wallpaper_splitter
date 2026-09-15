@@ -4,6 +4,8 @@
 #include <QFileDialog>
 #include <QGraphicsScene>
 #include <QMessageBox>
+#include <QMenu>
+#include <QStyle>
 #include <QPushButton>
 #include <QScreen>
 #include <QStandardPaths>
@@ -31,10 +33,19 @@ WallpaperSplitter::WallpaperSplitter(QWidget *parent)
     text->setPos(-rect.width() / 2.0, -rect.height() / 2.0);
     ui->graphicsView->centerOn(text);
 
+    auto *openButton = ui->buttonBoxOpen->button(QDialogButtonBox::Open);
+    openButton->setText(tr("Open"));
+    ui->settingsButton->setIcon(QIcon::fromTheme(QStringLiteral("configure"),
+                                               style()->standardIcon(QStyle::SP_FileDialogDetailedView)));
     auto *applyButton = ui->buttonBox->button(QDialogButtonBox::Ok);
-    auto *exportButton = ui->buttonBox->button(QDialogButtonBox::Save);
+    auto *exportButton = ui->exportButton;
     applyButton->setText(tr("Apply"));
     exportButton->setText(tr("Export"));
+    exportButton->setIcon(QIcon::fromTheme(QStringLiteral("document-save-as"),
+                                         style()->standardIcon(QStyle::SP_DialogSaveButton)));
+    exportButton->setObjectName(QStringLiteral("exportButton"));
+    exportButton->setAutoDefault(false);
+    applyButton->setDefault(true);
     applyButton->setEnabled(false);
     exportButton->setEnabled(false);
 
@@ -42,17 +53,22 @@ WallpaperSplitter::WallpaperSplitter(QWidget *parent)
             this, &WallpaperSplitter::selectImage);
     connect(applyButton, &QPushButton::pressed, this, &WallpaperSplitter::applyWallpaper);
     connect(exportButton, &QPushButton::pressed, this, &WallpaperSplitter::exportWallpapers);
-    auto *libraryButton = new QPushButton(tr("Library…"), this);
+    auto *libraryButton = new QPushButton(tr("Library"), this);
     libraryButton->setObjectName("libraryButton");
-    ui->horizontalLayout_2->insertWidget(2, libraryButton);
+    libraryButton->setIcon(QIcon::fromTheme(QStringLiteral("folder-pictures"),
+                                          style()->standardIcon(QStyle::SP_DirIcon)));
+    ui->footerLayout->insertWidget(1, libraryButton);
     connect(libraryButton, &QPushButton::clicked, this, [this] {
         SetLibraryDialog dialog(this);
         dialog.exec();
     });
-    auto *monitorsButton = new QPushButton(tr("Monitors…"), this);
-    monitorsButton->setObjectName("monitorsButton");
-    ui->horizontalLayout_2->insertWidget(3, monitorsButton);
-    connect(monitorsButton, &QPushButton::clicked, this, [this] {
+    auto *settingsMenu = new QMenu(ui->settingsButton);
+    ui->settingsButton->setMenu(settingsMenu);
+    settingsMenu->addAction(ui->settingsButton->icon(), tr("General"), this, &WallpaperSplitter::showSettings);
+    auto *monitorsAction = settingsMenu->addAction(QIcon::fromTheme(QStringLiteral("video-display"),
+            style()->standardIcon(QStyle::SP_ComputerIcon)), tr("Monitors"));
+    monitorsAction->setObjectName(QStringLiteral("monitorsAction"));
+    connect(monitorsAction, &QAction::triggered, this, [this] {
         MonitorsDialog dialog(MonitorLayout::connectedMonitors(), AppSettings::loadMonitors(), this);
         if (dialog.exec() != QDialog::Accepted) return;
         AppSettings::saveMonitors(dialog.preferences());
@@ -68,8 +84,13 @@ WallpaperSplitter::WallpaperSplitter(QWidget *parent)
         refreshMonitors();
     });
     connect(qApp, &QGuiApplication::screenRemoved, this, [this] { refreshMonitors(); });
-    connect(ui->settingsButton, &QPushButton::pressed, this, &WallpaperSplitter::showSettings);
-    connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    for (auto *button : {ui->buttonBoxOpen->button(QDialogButtonBox::Open),
+                         libraryButton, ui->settingsButton}) {
+        button->setAutoDefault(false);
+        button->setDefault(false);
+    }
+    applyButton->setDefault(true);
+
 }
 
 WallpaperSplitter::~WallpaperSplitter() {
@@ -90,7 +111,7 @@ void WallpaperSplitter::displayImage(const QImage &image) {
     screenGroup = nullptr;
     refreshMonitors();
     ui->buttonBox->button(QDialogButtonBox::Ok)->setEnabled(true);
-    ui->buttonBox->button(QDialogButtonBox::Save)->setEnabled(true);
+    ui->exportButton->setEnabled(true);
     scaleView();
 }
 

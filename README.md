@@ -47,7 +47,7 @@ originally filed in the original project's issue tracker.
 3. Click <kbd>Export</kbd> to save user-owned crop files, or <kbd>Apply</kbd> to
    write a managed wallpaper set and use it on the current Plasma activity.
 
-Use <kbd>Settings…</kbd> to choose the remembered input and export folders, the
+Use <kbd>Settings → General</kbd> to choose the remembered input and export folders, the
 export filename template, and what happens when an export already exists.
 Uncheck **Close the app after successfully applying a wallpaper set** to keep
 the window open for further adjustments after Apply. This preference is remembered;
@@ -55,7 +55,7 @@ closing after Apply is enabled by default.
 Templates support `{source}`, `{screen}`, `{number}`, `{revision}`, and
 `{digest}`.
 
-Use <kbd>Library…</kbd> to browse applied sets, with a preview, source image path,
+Use <kbd>Library</kbd> to browse applied sets, with a preview, source image path,
 creation time, monitor layout, crop mappings, and generated file paths. Reapply
 requires the saved monitor positions and resolutions to match the current layout;
 the original source image is not needed. Renaming changes the library label.
@@ -65,7 +65,7 @@ to another wallpaper before deleting. Exports and source images are kept.
 
 ### Physical monitor sizes
 
-Open <kbd>Monitors…</kbd> and enable **Use physical monitor sizes** when displays
+Open <kbd>Settings → Monitors</kbd> and enable **Use physical monitor sizes** when displays
 have different pixel densities, uneven heights, or bezel gaps. Enter each panel's diagonal in inches, or its
 visible width and height in millimeters. Reported dimensions are starting values;
 verify them against your displays. If dimensions are unavailable, the dialog
@@ -105,7 +105,7 @@ If the right panel sits **10 mm higher**, set its **Top = -10**; if it sits
 and resolutions too. A wallpaper with a clear line crossing the screens can help
 you check alignment and fine-tune the measurements.
 
-These instructions are also available through **How to line up monitors…** in
+These instructions are also available through **How to line up monitors** in
 the Monitors dialog.
 
 Measurements are remembered per monitor, including disconnected displays. A
