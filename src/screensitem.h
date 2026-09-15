@@ -7,12 +7,16 @@
 
 
 #include <QGraphicsItemGroup>
+#include "monitorlayout.h"
 
 enum ScalingMode {none, vertical, horizontal, diagonal};
 
 class ScreensItem : public QGraphicsItemGroup {
 public:
     explicit ScreensItem(QGraphicsItem *parent);
+    ScreensItem(QGraphicsItem *parent, const QList<MonitorInfo> &monitors,
+                const MonitorPreferences &preferences);
+    const QList<MonitorInfo> &monitors() const { return monitorList; }
 
     const QList<QGraphicsRectItem *> &getRectangles() const;
     void constrainToParent();
@@ -22,6 +26,8 @@ private:
     QList<QGraphicsRectItem*> rectangles{};
     qreal maxScale;
 
+    QList<MonitorInfo> monitorList;
+    MonitorPreferences preferences;
     void addScreens();
     void updateMaximumScale();
     QPointF constrainedPosition(const QPointF &position) const;

@@ -14,7 +14,7 @@ shown on the original issues.
 | ✅ Supported | [Inherit original filenames][upstream-13] | Generated crops use the source image's base name. More control over generated names is included in **Output settings** below. |
 | ✅ Supported | [Scene actions][upstream-2] | Drag and drop, <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd> zoom, and middle-button dragging to pan the zoomed preview are supported. |
 | ✅ Supported | [Configure default input and output folders][upstream-12] | The application remembers the last successfully used input and export folders. |
-| 📋 Proposed | [Account for physical screen sizes][upstream-11] | Scale monitor rectangles using their real-world dimensions as well as their pixel resolutions. |
+| ✅ Supported | [Account for physical screen sizes][upstream-11] | Optional physical dimensions, panel positions, and bezel gaps are configurable in **Monitors…** and remembered per display. |
 | ✅ Supported | [Apply split wallpapers from the command line][upstream-10] | The `--apply` option creates a managed set and applies it to the current Plasma activity. |
 | 📋 Proposed | [Add an "as large as possible" layout mode][upstream-8] | Offer an additional automatic image/layout scaling mode. |
 

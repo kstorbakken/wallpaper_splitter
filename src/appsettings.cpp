@@ -72,3 +72,32 @@ void AppSettings::reset() {
     settings.remove(QStringLiteral("folders"));
     settings.remove(QStringLiteral("output"));
 }
+
+MonitorPreferences AppSettings::loadMonitors() {
+    QSettings settings = userSettings();
+    MonitorPreferences preferences;
+    settings.beginGroup("monitors");
+    preferences.enabled = settings.value("physicalSizing", false).toBool();
+    for (const auto &id : settings.childGroups()) {
+        settings.beginGroup(id);
+        const QSizeF size = settings.value("millimeters").toSizeF();
+        const QPointF position = settings.value("position").toPointF();
+        if (MonitorLayout::validSize(size))
+            preferences.measurements.insert(id, {size, position, settings.value("portrait", false).toBool()});
+        settings.endGroup();
+    }
+    return preferences;
+}
+
+void AppSettings::saveMonitors(const MonitorPreferences &preferences) {
+    QSettings settings = userSettings();
+    settings.beginGroup("monitors");
+    settings.setValue("physicalSizing", preferences.enabled);
+    for (auto it = preferences.measurements.cbegin(); it != preferences.measurements.cend(); ++it) {
+        settings.beginGroup(it.key());
+        settings.setValue("millimeters", it->millimeters);
+        settings.setValue("position", it->position);
+        settings.setValue("portrait", it->portrait);
+        settings.endGroup();
+    }
+}

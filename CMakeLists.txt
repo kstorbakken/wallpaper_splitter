@@ -35,6 +35,8 @@ qt_add_executable(wallpaper_splitter
         src/settingsdialog.cpp
         src/setlibrary.cpp
         src/setlibrarydialog.cpp
+        src/monitorlayout.cpp
+        src/monitorsdialog.cpp
 )
 
 target_link_libraries(wallpaper_splitter PRIVATE
@@ -108,7 +110,9 @@ if(BUILD_TESTING)
             src/appsettings.cpp
             src/settingsdialog.cpp
             src/setlibrary.cpp
-            src/setlibrarydialog.cpp)
+            src/setlibrarydialog.cpp
+            src/monitorlayout.cpp
+            src/monitorsdialog.cpp)
     target_include_directories(splitimage_test PRIVATE src)
     target_link_libraries(splitimage_test PRIVATE
             Qt6::Core

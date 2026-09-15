@@ -12,6 +12,7 @@
 #include "resizableimageitem.h"
 #include "settingsdialog.h"
 #include "setlibrarydialog.h"
+#include "monitorsdialog.h"
 #include "ui_wallpapersplitter.h"
 
 WallpaperSplitter::WallpaperSplitter(QWidget *parent)
@@ -48,6 +49,25 @@ WallpaperSplitter::WallpaperSplitter(QWidget *parent)
         SetLibraryDialog dialog(this);
         dialog.exec();
     });
+    auto *monitorsButton = new QPushButton(tr("Monitors…"), this);
+    monitorsButton->setObjectName("monitorsButton");
+    ui->horizontalLayout_2->insertWidget(3, monitorsButton);
+    connect(monitorsButton, &QPushButton::clicked, this, [this] {
+        MonitorsDialog dialog(MonitorLayout::connectedMonitors(), AppSettings::loadMonitors(), this);
+        if (dialog.exec() != QDialog::Accepted) return;
+        AppSettings::saveMonitors(dialog.preferences());
+        refreshMonitors();
+    });
+    const auto watchScreen = [this](QScreen *screen) {
+        connect(screen, &QScreen::geometryChanged, this, [this] { refreshMonitors(); });
+        connect(screen, &QScreen::physicalSizeChanged, this, [this] { refreshMonitors(); });
+    };
+    for (auto *screen : QApplication::screens()) watchScreen(screen);
+    connect(qApp, &QGuiApplication::screenAdded, this, [this, watchScreen](QScreen *screen) {
+        watchScreen(screen);
+        refreshMonitors();
+    });
+    connect(qApp, &QGuiApplication::screenRemoved, this, [this] { refreshMonitors(); });
     connect(ui->settingsButton, &QPushButton::pressed, this, &WallpaperSplitter::showSettings);
     connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 }
@@ -67,19 +87,8 @@ void WallpaperSplitter::displayImage(const QImage &image) {
     ui->graphicsView->scene()->clear();
     imageItem = new ResizableImageItem(image);
     ui->graphicsView->scene()->addItem(imageItem);
-    screenGroup = new ScreensItem(imageItem);
-    imageItem->setScreenGroup(screenGroup);
-
-    const QSize screenSize = totalScreenSize();
-    if (image.width() < screenSize.width() || image.height() < screenSize.height()) {
-        const QImage scaled = image.scaled(screenSize, Qt::KeepAspectRatioByExpanding,
-                                           Qt::SmoothTransformation);
-        const qreal scale = static_cast<qreal>(scaled.width()) / image.width();
-        screenGroup->setScale(1 / scale);
-        screenGroup->setPos(imageItem->scenePos());
-    }
-    screenGroup->setPos(imageItem->boundingRect().center()
-                        - screenGroup->boundingRect().center());
+    screenGroup = nullptr;
+    refreshMonitors();
     ui->buttonBox->button(QDialogButtonBox::Ok)->setEnabled(true);
     ui->buttonBox->button(QDialogButtonBox::Save)->setEnabled(true);
     scaleView();
@@ -121,13 +130,9 @@ QList<ScreenCrop> WallpaperSplitter::currentScreenCrops() const {
     QList<ScreenCrop> result;
     if (screenGroup == nullptr) return result;
     const auto rectangles = screenGroup->getRectangles();
-    const auto screens = QApplication::screens();
+    const auto &screens = screenGroup->monitors();
     for (int index = 0; index < rectangles.size(); ++index) {
-        const QScreen *screen = screens.value(index);
-        const QString screenName = screen == nullptr || screen->name().isEmpty()
-                ? QStringLiteral("screen-%1").arg(index + 1) : screen->name();
-        result.append({screenName, index + 1,
-                       screen == nullptr ? QRect() : screen->geometry(),
+        result.append({screens[index].name, index + 1, screens[index].desktopGeometry,
                        screenGroup->mapRectToParent(rectangles.at(index)->rect()).toAlignedRect()});
     }
     return result;
@@ -222,12 +227,14 @@ QStringList WallpaperSplitter::splitImage(const QImage &image, const QString &pa
     return splitImage(image, geometries, path, outputBaseName);
 }
 
-QSize WallpaperSplitter::totalScreenSize() {
-    QRect screensRect;
-    for (const QScreen *screen : QApplication::screens()) {
-        screensRect = screensRect.isNull() ? screen->geometry() : screensRect.united(screen->geometry());
-    }
-    return screensRect.size();
+void WallpaperSplitter::refreshMonitors() {
+    if (imageItem == nullptr) return;
+    delete screenGroup;
+    screenGroup = new ScreensItem(imageItem);
+    imageItem->setScreenGroup(screenGroup);
+    screenGroup->constrainToParent();
+    screenGroup->setPos(imageItem->boundingRect().center() - screenGroup->boundingRect().center());
+    scaleView();
 }
 
 void WallpaperSplitter::resizeEvent(QResizeEvent *event) {
