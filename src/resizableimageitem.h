@@ -17,10 +17,14 @@ public:
     void setScreenGroup(ScreensItem *screens);
     void beginResize(Corner corner);
     void resizeTo(const QPointF &scenePosition, bool keepAspectRatio = false);
+    void stretchToLayout();
+    void restoreOriginal();
+    void fillToLayout();
 
 private:
     QImage sourceImage;
     QImage scaledImage;
+    QImage resizeSource;
     ScreensItem *screenGroup{};
     Corner activeCorner{Corner::BottomRight};
     QPointF fixedSceneCorner;

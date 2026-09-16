@@ -11,16 +11,23 @@
 
 static const qreal ZOOM_AMOUNT = .1;
 
+class QToolButton;
+
 class GraphicsView : public QGraphicsView {
 public:
     explicit GraphicsView(WallpaperSplitter *parent = nullptr);
+    QToolButton *stretchButton() const { return stretchImageButton; }
+    QToolButton *panoramaButton() const { return fillPanoramaButton; }
 
 private:
     WallpaperSplitter* parent;
     QPoint lastCursorPosition;
     bool panning{false};
+    QToolButton *stretchImageButton{};
+    QToolButton *fillPanoramaButton{};
 
 protected:
+    bool viewportEvent(QEvent *event) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;

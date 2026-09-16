@@ -37,6 +37,9 @@ private:
     QFileInfo imageFile;
     QSize originalImageSize;
     UserPreferences preferences;
+    enum class LayoutMode { Original, Stretch, Panorama };
+    LayoutMode layoutMode{LayoutMode::Original};
+    void toggleLayoutMode(LayoutMode mode);
 
     void scaleView();
     void displayImage(const QImage &image);

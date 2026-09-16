@@ -16,7 +16,7 @@ shown on the original issues.
 | ✅ Supported | [Configure default input and output folders][upstream-12] | The application remembers the last successfully used input and export folders. |
 | ✅ Supported | [Account for physical screen sizes][upstream-11] | Optional physical dimensions, panel positions, and bezel gaps are configurable in **Monitors…** and remembered per display. |
 | ✅ Supported | [Apply split wallpapers from the command line][upstream-10] | The `--apply` option creates a managed set and applies it to the current Plasma activity. |
-| 📋 Proposed | [Add an "as large as possible" layout mode][upstream-8] | Offer an additional automatic image/layout scaling mode. |
+| 📋 Proposed | [Add an "as large as possible" layout mode][upstream-8] | The original example’s intended behavior remains unclear. This fork separately supports **Fill panorama** (`--fill-panorama`) for a continuous proportional image and **Stretch across screens** (`--stretch-across-screens`). |
 
 Completed requests and bug reports from the original project are not duplicated
 here. See its [full issue history][upstream-issues] for that archival context.

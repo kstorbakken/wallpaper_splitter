@@ -5,6 +5,8 @@
 #include <QMap>
 #include <QRectF>
 #include <QString>
+#include <QTransform>
+#include <QImage>
 
 struct MonitorInfo {
     QString id;
@@ -27,6 +29,9 @@ struct MonitorPreferences {
 
 class MonitorLayout {
 public:
+    // Uniformly fit and center the complete layout, including gaps, in the image.
+    static QImage renderPanorama(const QImage &source, const QList<QRectF> &layout);
+    static QTransform largestFit(const QRectF &bounds, const QRectF &image);
     static QList<MonitorInfo> connectedMonitors();
     static QString identity(const QString &manufacturer, const QString &model,
                             const QString &serial, const QString &connector);

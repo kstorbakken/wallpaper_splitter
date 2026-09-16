@@ -95,6 +95,15 @@ private slots:
     void physicalDialogEditsDimensionsAndAlignment();
     void physicalLayoutFitsSmallImages();
     void commandLineUsesPhysicalMeasurements();
+    void largestLayoutFit_data();
+    void largestLayoutFit();
+    void largestFitButtonUsesImageEdges();
+    void stretchSpansOriginalImageAcrossScreens();
+    void commandLineLargestFit();
+    void panoramaPreservesProportionsAndContinuity();
+    void panoramaActionRestoresOriginalAndSwitchesBack();
+    void layoutButtonsToggleBackToLoadedState();
+    void panoramaPreviewKeepsThreeMonitorsSeparate();
 };
 
 void SplitImageTest::preservesRectangleOrderAndPixels() {
@@ -246,13 +255,13 @@ void SplitImageTest::resizeCannotExposeMonitorLayout() {
     auto *screens = new ScreensItem(image);
     image->setScreenGroup(screens);
 
-    const QSize requiredSize = screens->mapRectToParent(screens->boundingRect()).size().toSize();
+    const QSize requiredSize = screens->mapRectToParent(screens->layoutBounds()).size().toSize();
     image->beginResize(ResizableImageItem::Corner::TopLeft);
     image->resizeTo(image->mapToScene(image->boundingRect().bottomRight()));
 
     QVERIFY(image->image().width() >= requiredSize.width());
     QVERIFY(image->image().height() >= requiredSize.height());
-    QVERIFY(image->boundingRect().contains(screens->mapRectToParent(screens->boundingRect())));
+    QVERIFY(image->boundingRect().contains(screens->mapRectToParent(screens->layoutBounds())));
 }
 
 void SplitImageTest::screenControlsAcceptMoveAndScaleButtons() {
@@ -980,6 +989,302 @@ void SplitImageTest::commandLineUsesPhysicalMeasurements() {
     const QImage crop(output + "/physical-cli-1.png");
     QCOMPARE(crop.size(), QSize(300, 150));
     QCOMPARE(crop.pixelColor(100, 100), QColor(Qt::cyan));
+}
+
+void SplitImageTest::largestLayoutFit_data() {
+    QTest::addColumn<QSize>("imageSize");
+    QTest::addColumn<QRectF>("expectedBounds");
+    QTest::addColumn<bool>("physical");
+    QTest::newRow("wide") << QSize(640, 400) << QRectF(0, 100, 640, 200) << false;
+    QTest::newRow("portrait") << QSize(160, 800) << QRectF(0, 375, 160, 50) << false;
+    QTest::newRow("height-limited") << QSize(800, 100) << QRectF(240, 0, 320, 100) << false;
+    QTest::newRow("tiny") << QSize(16, 10) << QRectF(0, 2.5, 16, 5) << false;
+    QTest::newRow("physical-gap") << QSize(640, 400) << QRectF(0, 100, 640, 200) << true;
+}
+
+void SplitImageTest::largestLayoutFit() {
+    QFETCH(QSize, imageSize);
+    QFETCH(QRectF, expectedBounds);
+    QFETCH(bool, physical);
+    const QList<MonitorInfo> monitors{
+        {"a", "A", QRect(-100, -50, 100, 100), {}},
+        {"b", "B", QRect(20, 0, 200, 50), {}}};
+    MonitorPreferences preferences;
+    preferences.enabled = physical;
+    preferences.measurements.insert("a", {{100, 100}, {-100, -50}, false});
+    preferences.measurements.insert("b", {{200, 50}, {20, 0}, false});
+    QGraphicsScene scene;
+    QImage source(imageSize, QImage::Format_RGB32);
+    source.fill(Qt::cyan);
+    auto *parent = scene.addPixmap(QPixmap::fromImage(source));
+    auto *screens = new ScreensItem(parent, monitors, preferences);
+    screens->fitAsLargeAsPossible();
+    QCOMPARE(screens->mapRectToParent(screens->layoutBounds()), expectedBounds);
+    const auto rectangles = screens->getRectangles();
+    const auto first = screens->mapRectToParent(rectangles[0]->rect());
+    const auto second = screens->mapRectToParent(rectangles[1]->rect());
+    QCOMPARE(first.width(), second.width() / 2);
+    QCOMPARE(first.height(), second.height() * 2);
+    QCOMPARE(second.left() - first.right(), first.width() / 5);
+    QCOMPARE(second.top() - first.top(), first.height() / 2);
+    QVERIFY(parent->boundingRect().contains(first));
+    QVERIFY(parent->boundingRect().contains(second));
+    // A repeated fit also restores the layout after a manual adjustment.
+    screens->setScale(screens->scale() / 2);
+    screens->setPos(screens->pos() + QPointF(2, 2));
+    screens->fitAsLargeAsPossible();
+    QCOMPARE(screens->mapRectToParent(screens->layoutBounds()), expectedBounds);
+}
+
+void SplitImageTest::largestFitButtonUsesImageEdges() {
+    WallpaperSplitter splitter;
+    auto *button = splitter.findChild<QAbstractButton *>("stretchImageButton");
+    QVERIFY(button);
+    QVERIFY(!button->isEnabled());
+    QImage source(1600, 1200, QImage::Format_RGB32);
+    source.fill(Qt::red);
+    splitter.addImage(source);
+    QVERIFY(button->isEnabled());
+    button->click();
+    auto *view = splitter.findChild<QGraphicsView *>();
+    ScreensItem *screens = nullptr;
+    for (auto *item : view->scene()->items()) {
+        if (auto *candidate = dynamic_cast<ScreensItem *>(item)) screens = candidate;
+    }
+    QVERIFY(screens);
+    const QRectF fitted = screens->mapRectToParent(screens->layoutBounds());
+    auto *image = dynamic_cast<ResizableImageItem *>(screens->parentItem());
+    QVERIFY(image);
+    QCOMPARE(image->image().size(), screens->layoutBounds().size().toSize());
+    QCOMPARE(fitted, image->boundingRect());
+    QCOMPARE(image->image(), source.scaled(image->image().size(), Qt::IgnoreAspectRatio,
+                                         Qt::SmoothTransformation));
+}
+
+void SplitImageTest::stretchSpansOriginalImageAcrossScreens() {
+    QImage source(60, 60, QImage::Format_RGB32);
+    for (int y = 0; y < source.height(); ++y)
+        for (int x = 0; x < source.width(); ++x)
+            source.setPixelColor(x, y, QColor(x * 4, y * 4, 0));
+    QGraphicsScene scene;
+    auto *image = new ResizableImageItem(source);
+    scene.addItem(image);
+    auto *screens = new ScreensItem(image, {
+        {"a", "Left", QRect(-100, -50, 100, 100), {}},
+        {"b", "Right", QRect(0, -50, 100, 100), {}}}, {});
+    image->setScreenGroup(screens);
+    image->stretchToLayout();
+    const QImage expected = source.scaled(200, 100, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    QCOMPARE(image->image(), expected);
+    QList<ScreenCrop> crops;
+    for (const auto *rect : screens->getRectangles())
+        crops.append({"screen", int(crops.size()) + 1, {},
+                      screens->mapRectToParent(rect->rect()).toAlignedRect()});
+    QList<CropArtifact> artifacts;
+    QVERIFY(OutputService::createCrops(image->image(), crops, &artifacts).success);
+    QCOMPARE(artifacts.size(), 2);
+    QCOMPARE(artifacts[0].image, expected.copy(0, 0, 100, 100));
+    QCOMPARE(artifacts[1].image, expected.copy(100, 0, 100, 100));
+    // Fitting again discards manual stretching and uses the original pixels.
+    image->beginResize(ResizableImageItem::Corner::BottomRight);
+    image->resizeTo(image->mapToScene(QPointF(400, 300)));
+    QVERIFY(image->image().size() != expected.size());
+    screens->setScale(0.5);
+    image->stretchToLayout();
+    QCOMPARE(image->image(), expected);
+    QCOMPARE(screens->mapRectToParent(screens->layoutBounds()), QRectF(expected.rect()));
+}
+
+void SplitImageTest::commandLineLargestFit() {
+    QTemporaryDir temporary;
+    QImage source(120, 90, QImage::Format_RGB32);
+    for (int y = 0; y < source.height(); ++y)
+        for (int x = 0; x < source.width(); ++x)
+            source.setPixelColor(x, y, QColor(x, y, 0));
+    const QString sourcePath = temporary.filePath("fit.png");
+    QVERIFY(source.save(sourcePath));
+    const QString configRoot = temporary.filePath("config");
+    QSettings settings(configRoot + "/wallpaper-splitter/settings.conf", QSettings::IniFormat);
+    settings.setValue("monitors/physicalSizing", true);
+    for (const auto &monitor : MonitorLayout::connectedMonitors()) {
+        settings.setValue("monitors/" + monitor.id + "/millimeters", QSizeF(100, 50));
+        settings.setValue("monitors/" + monitor.id + "/position", QPointF(-100, -20));
+        settings.setValue("monitors/" + monitor.id + "/portrait",
+                          monitor.desktopGeometry.height() > monitor.desktopGeometry.width());
+    }
+    settings.sync();
+    QProcess process;
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("XDG_CONFIG_HOME", configRoot);
+    process.setProcessEnvironment(environment);
+    process.setProgram(QCoreApplication::applicationDirPath() + "/wallpaper_splitter");
+    const QString output = temporary.filePath("output");
+    process.setArguments({"--stretch-across-screens", "--destination", output,
+                          "--filename-template", "{source}-{number}", sourcePath});
+    process.start();
+    QVERIFY(process.waitForFinished());
+    QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+    const QImage crop(output + "/fit-1.png");
+    QCOMPARE(crop, source.scaled(400, 200, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
+    process.setArguments({"--fill-panorama", "--destination", output,
+                          "--collision", "replace", "--filename-template", "{source}-{number}", sourcePath});
+    process.start();
+    QVERIFY(process.waitForFinished());
+    QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+    const QImage panorama(output + "/fit-1.png");
+    QCOMPARE(panorama.size(), QSize(400, 200));
+    QVERIFY(qAbs(panorama.pixelColor(200, 100).red() - 60) <= 1);
+    QVERIFY(qAbs(panorama.pixelColor(200, 100).green() - 45) <= 1);
+    QVERIFY(qAbs(panorama.pixelColor(0, 0).green() - 15) <= 1);
+    process.setArguments({"--fill-panorama", "--stretch-across-screens", sourcePath});
+    process.start();
+    QVERIFY(process.waitForFinished());
+    QCOMPARE(process.exitCode(), 2);
+    for (const auto &option : {"--top-left", "--bottom-right"}) {
+        process.setArguments({"--stretch-across-screens", option, "0,0", sourcePath});
+        process.start();
+        QVERIFY(process.waitForFinished());
+        QCOMPARE(process.exitCode(), 2);
+        QVERIFY(process.readAllStandardError().contains("cannot be combined"));
+    }
+}
+
+void SplitImageTest::panoramaPreservesProportionsAndContinuity() {
+    QImage source(300, 200, QImage::Format_RGB32);
+    for (int y = 0; y < source.height(); ++y)
+        for (int x = 0; x < source.width(); ++x)
+            source.setPixelColor(x, y, QColor(x % 256, y, 80));
+    const QList<QRectF> layout{{-100, -10, 100, 100}, {0, -10, 100, 100}, {100, -10, 100, 100}};
+    const auto rendered = MonitorLayout::renderPanorama(source, layout);
+    QCOMPARE(rendered.convertToFormat(source.format()), source.copy(0, 50, 300, 100));
+    const auto portrait = MonitorLayout::renderPanorama(source, {{0, 0, 100, 100}, {0, 100, 100, 100}});
+    QCOMPARE(portrait.convertToFormat(source.format()), source.copy(100, 0, 100, 200));
+    const auto gapped = MonitorLayout::renderPanorama(source, {{-100, -10, 100, 100}, {10, 0, 190, 100}});
+    QCOMPARE(gapped.convertToFormat(source.format()), source.copy(0, 45, 300, 110));
+    QVERIFY(MonitorLayout::renderPanorama(source, {}).isNull());
+    QVERIFY(MonitorLayout::renderPanorama({}, layout).isNull());
+}
+
+void SplitImageTest::panoramaActionRestoresOriginalAndSwitchesBack() {
+    WallpaperSplitter splitter;
+    QImage source(320, 120, QImage::Format_RGB32);
+    source.fill(Qt::cyan);
+    splitter.addImage(source);
+    auto *view = static_cast<GraphicsView *>(splitter.findChild<QGraphicsView *>());
+    QVERIFY(view);
+    auto *stretch = splitter.findChild<QAbstractButton *>("stretchImageButton");
+    auto *maximize = splitter.findChild<QAbstractButton *>("fillPanoramaButton");
+    QVERIFY(stretch && maximize);
+    stretch->click();
+    maximize->click();
+    ResizableImageItem *image = nullptr;
+    ScreensItem *screens = nullptr;
+    for (auto *item : view->scene()->items()) {
+        if (auto *candidate = dynamic_cast<ResizableImageItem *>(item)) image = candidate;
+        if (auto *candidate = dynamic_cast<ScreensItem *>(item)) screens = candidate;
+    }
+    QVERIFY(image && screens);
+    const auto layout = MonitorLayout::rectangles(screens->monitors(), AppSettings::loadMonitors());
+    QRectF bounds;
+    for (const auto &rect : layout) bounds = bounds.united(rect);
+    QCOMPARE(image->image().size(), bounds.size().toSize());
+    for (int i = 0; i < layout.size(); ++i)
+        QCOMPARE(screens->getRectangles()[i]->rect(), layout[i]);
+    stretch->click();
+    QCOMPARE(image->image().size(), bounds.size().toSize());
+    QCOMPARE(image->image(), source.scaled(bounds.size().toSize(), Qt::IgnoreAspectRatio,
+                                           Qt::SmoothTransformation));
+}
+
+void SplitImageTest::layoutButtonsToggleBackToLoadedState() {
+    WallpaperSplitter splitter;
+    QImage source(320, 120, QImage::Format_RGB32);
+    source.fill(Qt::cyan);
+    source.setPixelColor(30, 40, Qt::red);
+    splitter.addImage(source);
+    auto *view = splitter.findChild<QGraphicsView *>();
+    auto *stretch = splitter.findChild<QAbstractButton *>("stretchImageButton");
+    auto *panorama = splitter.findChild<QAbstractButton *>("fillPanoramaButton");
+    QVERIFY(view && stretch && panorama);
+    ResizableImageItem *image = nullptr;
+    for (auto *item : view->scene()->items())
+        if (auto *candidate = dynamic_cast<ResizableImageItem *>(item)) image = candidate;
+    QVERIFY(image);
+    const auto cropRectangles = [&] {
+        QList<QRectF> result;
+        for (auto *item : view->scene()->items()) {
+            if (auto *screens = dynamic_cast<ScreensItem *>(item))
+                for (const auto *rect : screens->getRectangles())
+                    result.append(screens->mapRectToParent(rect->rect()));
+        }
+        return result;
+    };
+    const auto originalCrops = cropRectangles();
+    const auto originalPosition = image->pos();
+    for (auto *button : {stretch, panorama}) {
+        QVERIFY(!button->isChecked());
+        button->click();
+        QVERIFY(button->isChecked());
+        image->beginResize(ResizableImageItem::Corner::TopLeft);
+        image->resizeTo(image->mapToScene(QPointF(-100, -100)));
+        button->click();
+        QVERIFY(!stretch->isChecked());
+        QVERIFY(!panorama->isChecked());
+        QCOMPARE(image->image(), source);
+        QCOMPARE(image->pos(), originalPosition);
+        QCOMPARE(cropRectangles(), originalCrops);
+    }
+    stretch->click();
+    panorama->click();
+    QVERIFY(!stretch->isChecked());
+    QVERIFY(panorama->isChecked());
+    panorama->click();
+    QCOMPARE(image->image(), source);
+    QCOMPARE(cropRectangles(), originalCrops);
+    stretch->click();
+    splitter.addImage(source);
+    QVERIFY(!stretch->isChecked());
+    QVERIFY(!panorama->isChecked());
+    QCOMPARE(cropRectangles(), originalCrops);
+}
+
+void SplitImageTest::panoramaPreviewKeepsThreeMonitorsSeparate() {
+    QImage source(300, 200, QImage::Format_RGB32);
+    source.fill(Qt::blue);
+    source.setPixelColor(150, 100, Qt::red);
+    const QList<MonitorInfo> monitors{
+        {"a", "Left", QRect(-100, -10, 100, 100), {}},
+        {"b", "Middle", QRect(0, -10, 100, 100), {}},
+        {"c", "Right", QRect(100, -10, 100, 100), {}}};
+    QGraphicsScene scene;
+    auto *image = new ResizableImageItem(source);
+    scene.addItem(image);
+    auto *screens = new ScreensItem(image, monitors, {});
+    image->setScreenGroup(screens);
+    image->fillToLayout();
+    QCOMPARE(image->image().size(), QSize(300, 100));
+    QList<ScreenCrop> crops;
+    for (int i = 0; i < 3; ++i) {
+        QCOMPARE(screens->getRectangles()[i]->rect(), QRectF(monitors[i].desktopGeometry));
+        const QRect mapped = screens->mapRectToParent(screens->getRectangles()[i]->rect()).toAlignedRect();
+        QCOMPARE(mapped, QRect(i * 100, 0, 100, 100));
+        crops.append({monitors[i].name, i + 1, monitors[i].desktopGeometry, mapped});
+    }
+    QList<CropArtifact> artifacts;
+    QVERIFY(OutputService::createCrops(image->image(), crops, &artifacts).success);
+    for (int i = 0; i < 3; ++i)
+        QCOMPARE(artifacts[i].image.convertToFormat(source.format()), source.copy(i * 100, 50, 100, 100));
+    const QImage firstRender = image->image();
+    image->fillToLayout();
+    QCOMPARE(image->image(), firstRender);
+    image->beginResize(ResizableImageItem::Corner::BottomRight);
+    image->resizeTo(image->mapToScene(QPointF(600, 200)));
+    QCOMPARE(image->image(), firstRender.scaled(600, 200, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
+    image->stretchToLayout();
+    QCOMPARE(image->image(), source.scaled(300, 100, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
+    const QImage gapped = MonitorLayout::renderPanorama(source, {{-100, -10, 100, 100}, {10, 0, 100, 100}});
+    QCOMPARE(gapped.size(), QSize(210, 110));
+    QCOMPARE(gapped.pixelColor(105, 50), QColor(Qt::blue));
 }
 
 QTEST_MAIN(SplitImageTest)

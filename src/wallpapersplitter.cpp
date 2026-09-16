@@ -7,6 +7,7 @@
 #include <QMenu>
 #include <QStyle>
 #include <QPushButton>
+#include <QToolButton>
 #include <QScreen>
 #include <QStandardPaths>
 
@@ -53,6 +54,12 @@ WallpaperSplitter::WallpaperSplitter(QWidget *parent)
             this, &WallpaperSplitter::selectImage);
     connect(applyButton, &QPushButton::pressed, this, &WallpaperSplitter::applyWallpaper);
     connect(exportButton, &QPushButton::pressed, this, &WallpaperSplitter::exportWallpapers);
+    connect(graphicsView->stretchButton(), &QToolButton::clicked, this, [this] {
+        toggleLayoutMode(LayoutMode::Stretch);
+    });
+    connect(graphicsView->panoramaButton(), &QToolButton::clicked, this, [this] {
+        toggleLayoutMode(LayoutMode::Panorama);
+    });
     auto *libraryButton = new QPushButton(tr("Library"), this);
     libraryButton->setObjectName("libraryButton");
     libraryButton->setIcon(QIcon::fromTheme(QStringLiteral("folder-pictures"),
@@ -109,9 +116,15 @@ void WallpaperSplitter::displayImage(const QImage &image) {
     imageItem = new ResizableImageItem(image);
     ui->graphicsView->scene()->addItem(imageItem);
     screenGroup = nullptr;
+    layoutMode = LayoutMode::Original;
     refreshMonitors();
     ui->buttonBox->button(QDialogButtonBox::Ok)->setEnabled(true);
     ui->exportButton->setEnabled(true);
+    auto *view = static_cast<GraphicsView *>(ui->graphicsView);
+    for (auto *button : {view->stretchButton(), view->panoramaButton()}) {
+        button->setEnabled(true);
+        button->show();
+    }
     scaleView();
 }
 
@@ -154,7 +167,8 @@ QList<ScreenCrop> WallpaperSplitter::currentScreenCrops() const {
     const auto &screens = screenGroup->monitors();
     for (int index = 0; index < rectangles.size(); ++index) {
         result.append({screens[index].name, index + 1, screens[index].desktopGeometry,
-                       screenGroup->mapRectToParent(rectangles.at(index)->rect()).toAlignedRect()});
+                       screenGroup->mapRectToParent(rectangles.at(index)->rect()).toAlignedRect()
+                           .intersected(imageItem->image().rect())});
     }
     return result;
 }
@@ -251,11 +265,29 @@ QStringList WallpaperSplitter::splitImage(const QImage &image, const QString &pa
 void WallpaperSplitter::refreshMonitors() {
     if (imageItem == nullptr) return;
     delete screenGroup;
-    screenGroup = new ScreensItem(imageItem);
+    const auto monitors = MonitorLayout::connectedMonitors();
+    const auto settings = AppSettings::loadMonitors();
+    screenGroup = new ScreensItem(imageItem, monitors, settings);
     imageItem->setScreenGroup(screenGroup);
-    screenGroup->constrainToParent();
-    screenGroup->setPos(imageItem->boundingRect().center() - screenGroup->boundingRect().center());
+    if (layoutMode == LayoutMode::Panorama) {
+        imageItem->fillToLayout();
+    } else if (layoutMode == LayoutMode::Stretch) {
+        imageItem->stretchToLayout();
+    } else {
+        screenGroup->constrainToParent();
+        screenGroup->setPos(imageItem->boundingRect().center() - screenGroup->layoutBounds().center());
+    }
+    auto *view = static_cast<GraphicsView *>(ui->graphicsView);
+    view->stretchButton()->setChecked(layoutMode == LayoutMode::Stretch);
+    view->panoramaButton()->setChecked(layoutMode == LayoutMode::Panorama);
     scaleView();
+}
+
+void WallpaperSplitter::toggleLayoutMode(LayoutMode mode) {
+    if (imageItem == nullptr) return;
+    layoutMode = layoutMode == mode ? LayoutMode::Original : mode;
+    imageItem->restoreOriginal();
+    refreshMonitors();
 }
 
 void WallpaperSplitter::resizeEvent(QResizeEvent *event) {
