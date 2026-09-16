@@ -42,7 +42,7 @@ private:
     void displayImage(const QImage &image);
     QList<ScreenCrop> currentScreenCrops() const;
     QString sourceName() const;
-    static inline QSize totalScreenSize();
+    void refreshMonitors();
     void showOperationError(const OperationResult &result);
 
 private slots:

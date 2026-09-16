@@ -1,4 +1,8 @@
 #include <QColor>
+#include <QCheckBox>
+#include <QDoubleSpinBox>
+#include <limits>
+#include <cmath>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QGraphicsTextItem>
@@ -27,6 +31,8 @@
 #include "settingsdialog.h"
 #include "setlibrary.h"
 #include "setlibrarydialog.h"
+#include "monitorlayout.h"
+#include "monitorsdialog.h"
 
 namespace {
 class FakePlasmaApplicator final : public PlasmaApplicator {
@@ -83,6 +89,12 @@ private slots:
     void libraryRejectsUnsafeDeletion();
     void libraryHandlesBrokenSets();
     void libraryDialogShowsSets();
+    void physicalLayoutCompensatesForPixelDensity();
+    void physicalMeasurementsHandleRotationAndInvalidData();
+    void physicalMeasurementsPersistSeparately();
+    void physicalDialogEditsDimensionsAndAlignment();
+    void physicalLayoutFitsSmallImages();
+    void commandLineUsesPhysicalMeasurements();
 };
 
 void SplitImageTest::preservesRectangleOrderAndPixels() {
@@ -385,7 +397,20 @@ void SplitImageTest::footerControlsStayGroupedWhenWindowWidens() {
     const auto *openButton = openBox->button(QDialogButtonBox::Open);
     QVERIFY(openButton != nullptr);
     QVERIFY(openBox->width() <= openBox->sizeHint().width());
-    QVERIFY(settings->geometry().left() - openBox->geometry().right() <= 12);
+    auto *library = splitter.findChild<QPushButton *>(QStringLiteral("libraryButton"));
+
+    auto *view = splitter.findChild<QGraphicsView *>();
+    auto *exportButton = splitter.findChild<QPushButton *>(QStringLiteral("exportButton"));
+    QVERIFY(library && view && exportButton);
+    QVERIFY(library->geometry().left() - openBox->geometry().right() <= 12);
+    QVERIFY(settings->geometry().left() - library->geometry().right() <= 12);
+    QVERIFY(openBox->geometry().top() > view->geometry().bottom());
+    QVERIFY(actions->geometry().top() > view->geometry().bottom());
+    QVERIFY(exportButton->geometry().right() < actions->geometry().left());
+    QVERIFY(actions->geometry().left() - exportButton->geometry().right() <= 12);
+    QVERIFY(settings->menu() != nullptr);
+    QVERIFY(actions->button(QDialogButtonBox::Cancel) == nullptr);
+    QVERIFY(actions->button(QDialogButtonBox::Ok)->isDefault());
     QVERIFY(openButton->geometry().left() <= 1);
     QVERIFY(splitter.width() - actions->geometry().right() <= 20);
 }
@@ -499,10 +524,12 @@ void SplitImageTest::persistsOutputSettings() {
                        settingsDirectory.path());
     AppSettings::reset();
     const UserPreferences defaults = AppSettings::load();
+    QVERIFY(defaults.closeAfterApply);
     QCOMPARE(defaults.fileNameTemplate, QStringLiteral("{source}-{number}"));
     QCOMPARE(defaults.collisionPolicy, CollisionPolicy::Ask);
     const UserPreferences original = AppSettings::load();
     UserPreferences expected;
+    expected.closeAfterApply = false;
     expected.inputDirectory = QStringLiteral("/tmp/input-wallpapers");
     expected.exportDirectory = QStringLiteral("/tmp/export-wallpapers");
     expected.fileNameTemplate = QStringLiteral("{screen}-{number}{revision}");
@@ -510,10 +537,13 @@ void SplitImageTest::persistsOutputSettings() {
     AppSettings::save(expected);
 
     const UserPreferences actual = AppSettings::load();
+    QVERIFY(!actual.closeAfterApply);
     QCOMPARE(actual.inputDirectory, expected.inputDirectory);
     QCOMPARE(actual.exportDirectory, expected.exportDirectory);
     QCOMPARE(actual.fileNameTemplate, expected.fileNameTemplate);
     QCOMPARE(actual.collisionPolicy, expected.collisionPolicy);
+    AppSettings::reset();
+    QVERIFY(AppSettings::load().closeAfterApply);
     AppSettings::save(original);
 }
 
@@ -798,6 +828,158 @@ void SplitImageTest::libraryDialogShowsSets() {
     auto *list = populated.findChild<QListWidget *>("setList");
     QCOMPARE(list->count(), 1);
     QCOMPARE(list->currentItem()->text(), "green.png");
+}
+
+void SplitImageTest::physicalLayoutCompensatesForPixelDensity() {
+    const QList<MonitorInfo> monitors{{"a", "left", QRect(0, 0, 800, 400), QSizeF(100, 50)},
+                                       {"b", "right", QRect(800, 0, 1600, 800), QSizeF(100, 50)}};
+    MonitorPreferences preferences;
+    auto layout = MonitorLayout::rectangles(monitors, preferences);
+    QCOMPARE(layout[0], QRectF(monitors[0].desktopGeometry));
+    QCOMPARE(layout[1], QRectF(monitors[1].desktopGeometry));
+    preferences.enabled = true;
+    layout = MonitorLayout::rectangles(monitors, preferences);
+    QCOMPARE(layout[0].right(), layout[1].left()); // Default adjacency follows physical widths.
+    preferences.measurements.insert("a", {{100, 50}, {0, 0}, false});
+    preferences.measurements.insert("b", {{100, 50}, {100, 0}, false});
+    layout = MonitorLayout::rectangles(monitors, preferences);
+    QCOMPARE(layout[0].size(), layout[1].size());
+    QCOMPARE(layout[0].right(), layout[1].left());
+    QImage image(800, 200, QImage::Format_RGB32);
+    for (int y = 0; y < image.height(); ++y)
+        for (int x = 0; x < image.width(); ++x)
+            image.setPixelColor(x, y, QColor(x % 256, y, 0));
+    QList<ScreenCrop> screens;
+    for (int i = 0; i < monitors.size(); ++i)
+        screens.append({monitors[i].name, i + 1, monitors[i].desktopGeometry, layout[i].toAlignedRect()});
+    QList<CropArtifact> crops;
+    QVERIFY(OutputService::createCrops(image, screens, &crops).success);
+    QCOMPARE(crops[0].image.size(), QSize(400, 200));
+    QCOMPARE(crops[1].image.size(), QSize(400, 200));
+    QCOMPARE(crops[0].image.pixelColor(399, 100), image.pixelColor(399, 100));
+    QCOMPARE(crops[1].image.pixelColor(0, 100), image.pixelColor(400, 100));
+    QTemporaryDir root;
+    FakePlasmaApplicator plasma(true);
+    QVERIFY(OutputService::applyManaged(image, image.size(), screens, "source.png", {}, plasma, root.path()).success);
+    QCOMPARE(plasma.receivedScreens[1].desktopGeometry, monitors[1].desktopGeometry);
+    const auto saved = SetLibrary(root.path()).sets().first();
+    QCOMPARE(saved.screens[1].cropRect, QRect(400, 0, 400, 200));
+    QCOMPARE(saved.screens[1].desktopGeometry, monitors[1].desktopGeometry);
+    // Preview must use physical crop proportions, even though the second desktop is twice as wide.
+    QCOMPARE(SetLibrary::preview(saved, QSize(800, 200)).pixelColor(400, 100), image.pixelColor(400, 100));
+    preferences.measurements["b"].position = {-105, -10};
+    layout = MonitorLayout::rectangles(monitors, preferences);
+    QCOMPARE(layout[1].topLeft(), QPointF(-420, -40));
+    QCOMPARE(layout[0].left() - layout[1].right(), 20.0); // 5 mm bezel gap.
+}
+
+void SplitImageTest::physicalMeasurementsHandleRotationAndInvalidData() {
+    const QSizeF diagonal = MonitorLayout::sizeFromDiagonal(27, QSize(1920, 1080));
+    QVERIFY(qAbs(diagonal.width() / diagonal.height() - 16.0 / 9.0) < 0.00001);
+    QVERIFY(qAbs(std::hypot(diagonal.width(), diagonal.height()) - 27 * 25.4) < 0.00001);
+    MonitorInfo monitor{"a", "portrait", QRect(0, 0, 1080, 1920), {}};
+    MonitorPreferences preferences;
+    preferences.measurements.insert("a", {{600, 337.5}, {-600, 50}, false});
+    const auto rotated = MonitorLayout::measurement(monitor, preferences, 0.25);
+    QCOMPARE(rotated.millimeters, QSizeF(337.5, 600));
+    QCOMPARE(rotated.position, QPointF(-600, 50));
+    QVERIFY(rotated.portrait);
+    preferences.measurements["a"].millimeters = QSizeF(std::numeric_limits<double>::quiet_NaN(), 100);
+    const auto fallback = MonitorLayout::measurement(monitor, preferences, 0.25);
+    QVERIFY(MonitorLayout::validSize(fallback.millimeters));
+    QVERIFY(fallback.millimeters.height() > fallback.millimeters.width());
+    QVERIFY(!MonitorLayout::validSize(QSizeF(0, 10)));
+    QCOMPARE(MonitorLayout::identity("vendor", "model", "serial", "DP-1"),
+             MonitorLayout::identity("vendor", "model", "serial", "HDMI-1"));
+    QVERIFY(MonitorLayout::identity("vendor", "model", "", "DP-1")
+            != MonitorLayout::identity("vendor", "model", "", "DP-2"));
+}
+
+void SplitImageTest::physicalMeasurementsPersistSeparately() {
+    QTemporaryDir settingsDirectory;
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, settingsDirectory.path());
+    QVERIFY(!AppSettings::loadMonitors().enabled);
+    MonitorPreferences expected;
+    expected.enabled = true;
+    expected.measurements.insert("connected", {{600, 340}, {-605, 10}, false});
+    expected.measurements.insert("disconnected", {{300, 530}, {0, -50}, true});
+    AppSettings::saveMonitors(expected);
+    AppSettings::save(UserPreferences{});
+    AppSettings::reset(); // Output preferences must not erase monitor calibration.
+    const auto actual = AppSettings::loadMonitors();
+    QVERIFY(actual.enabled);
+    QCOMPARE(actual.measurements.size(), 2);
+    QCOMPARE(actual.measurements["connected"].millimeters, QSizeF(600, 340));
+    QCOMPARE(actual.measurements["connected"].position, QPointF(-605, 10));
+    QVERIFY(actual.measurements["disconnected"].portrait);
+}
+
+void SplitImageTest::physicalDialogEditsDimensionsAndAlignment() {
+    const QList<MonitorInfo> monitors{{"a", "left", QRect(-1920, 0, 1920, 1080), QSizeF(600, 340)},
+                                       {"b", "right", QRect(0, 0, 3840, 2160), QSizeF(600, 340)}};
+    MonitorPreferences saved;
+    saved.measurements.insert("disconnected", {{500, 300}, {}, false});
+    MonitorsDialog dialog(monitors, saved);
+    dialog.show();
+    QApplication::processEvents();
+    dialog.findChild<QCheckBox *>("physicalSizing")->setChecked(true);
+    dialog.findChild<QDoubleSpinBox *>("diagonal-0")->setValue(24);
+    auto edited = dialog.preferences();
+    QVERIFY(qAbs(edited.measurements["a"].millimeters.width() - 531.3) < 0.2);
+    dialog.findChild<QDoubleSpinBox *>("width-0")->setValue(550);
+    dialog.findChild<QPushButton *>("arrangeMonitors")->click();
+    edited = dialog.preferences();
+    QVERIFY(edited.enabled);
+    QCOMPARE(edited.measurements["b"].position, QPointF(550, 0));
+    QVERIFY(edited.measurements.contains("disconnected"));
+    QCOMPARE(saved.measurements.size(), 1); // Editing alone does not mutate saved preferences.
+}
+
+void SplitImageTest::physicalLayoutFitsSmallImages() {
+    QGraphicsScene scene;
+    QImage image(20, 20, QImage::Format_RGB32);
+    image.fill(Qt::red);
+    auto *parent = scene.addPixmap(QPixmap::fromImage(image));
+    MonitorPreferences preferences;
+    preferences.enabled = true;
+    preferences.measurements.insert("a", {{600, 340}, {-600, 10}, false});
+    auto *screens = new ScreensItem(parent, {{"a", "screen", QRect(0, 0, 1920, 1080), {}}}, preferences);
+    screens->constrainToParent();
+    const auto crop = screens->mapRectToParent(screens->getRectangles().first()->rect());
+    QVERIFY(parent->boundingRect().contains(crop));
+    QVERIFY(screens->scale() < 0.1);
+}
+
+void SplitImageTest::commandLineUsesPhysicalMeasurements() {
+    QTemporaryDir temporary;
+    const QString configRoot = temporary.filePath("config");
+    QSettings settings(configRoot + "/wallpaper-splitter/settings.conf", QSettings::IniFormat);
+    settings.setValue("monitors/physicalSizing", true);
+    for (const auto &monitor : MonitorLayout::connectedMonitors()) {
+        settings.setValue("monitors/" + monitor.id + "/millimeters", QSizeF(100, 50));
+        settings.setValue("monitors/" + monitor.id + "/position", QPointF(-100, -20));
+        settings.setValue("monitors/" + monitor.id + "/portrait",
+                          monitor.desktopGeometry.height() > monitor.desktopGeometry.width());
+    }
+    settings.sync();
+    QImage source(1200, 900, QImage::Format_RGB32);
+    source.fill(Qt::cyan);
+    const QString sourcePath = temporary.filePath("physical-cli.png");
+    QVERIFY(source.save(sourcePath));
+    const QString output = temporary.filePath("exports");
+    QProcess process;
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("XDG_CONFIG_HOME", configRoot);
+    process.setProcessEnvironment(environment);
+    process.setProgram(QCoreApplication::applicationDirPath() + "/wallpaper_splitter");
+    process.setArguments({"--destination", output, "--bottom-right", "300,200",
+                          "--collision", "replace", sourcePath});
+    process.start();
+    QVERIFY(process.waitForFinished());
+    QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+    const QImage crop(output + "/physical-cli-1.png");
+    QCOMPARE(crop.size(), QSize(300, 150));
+    QCOMPARE(crop.pixelColor(100, 100), QColor(Qt::cyan));
 }
 
 QTEST_MAIN(SplitImageTest)

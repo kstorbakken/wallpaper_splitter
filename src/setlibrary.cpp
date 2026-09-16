@@ -180,7 +180,7 @@ OperationResult SetLibrary::remove(const QString &id, PlasmaApplicator &applicat
 
 QImage SetLibrary::preview(const WallpaperSet &set, const QSize &size) {
     QRect bounds;
-    for (const auto &screen : set.screens) bounds = bounds.united(screen.desktopGeometry);
+    for (const auto &screen : set.screens) bounds = bounds.united(screen.cropRect);
     if (!bounds.isValid() || !size.isValid()) return {};
     QImage image(size, QImage::Format_ARGB32_Premultiplied);
     image.fill(Qt::transparent);
@@ -191,7 +191,7 @@ QImage SetLibrary::preview(const WallpaperSet &set, const QSize &size) {
     painter.scale(scale, scale);
     painter.translate(-bounds.topLeft());
     for (int i = 0; i < set.screens.size(); ++i) {
-        const QRect rect = set.screens[i].desktopGeometry;
+        const QRect rect = set.screens[i].cropRect;
         QImageReader reader(set.paths.value(i));
         reader.setScaledSize((QSizeF(rect.size()) * scale).toSize().expandedTo(QSize(1, 1)));
         painter.fillRect(rect, Qt::darkGray);

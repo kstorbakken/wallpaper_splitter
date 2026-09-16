@@ -9,6 +9,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QStyle>
 #include <QScreen>
 #include <QSplitter>
 #include <QVBoxLayout>
@@ -40,8 +41,12 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
     layout->addWidget(splitter, 1);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     applyButton = buttons->addButton(tr("Reapply"), QDialogButtonBox::ActionRole);
-    renameButton = buttons->addButton(tr("Rename…"), QDialogButtonBox::ActionRole);
-    deleteButton = buttons->addButton(tr("Delete…"), QDialogButtonBox::ActionRole);
+    renameButton = buttons->addButton(tr("Rename"), QDialogButtonBox::ActionRole);
+    renameButton->setIcon(QIcon::fromTheme(QStringLiteral("edit-rename"),
+                                          style()->standardIcon(QStyle::SP_FileDialogDetailedView)));
+    deleteButton = buttons->addButton(tr("Delete"), QDialogButtonBox::ActionRole);
+    deleteButton->setIcon(QIcon::fromTheme(QStringLiteral("edit-delete"),
+                                          style()->standardIcon(QStyle::SP_TrashIcon)));
     auto *refreshButton = buttons->addButton(tr("Refresh"), QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);

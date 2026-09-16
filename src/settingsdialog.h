@@ -6,6 +6,7 @@
 #include "appsettings.h"
 
 class QComboBox;
+class QCheckBox;
 class QLineEdit;
 
 class SettingsDialog final : public QDialog {
@@ -20,6 +21,7 @@ private slots:
     void resetDefaults();
 
 private:
+    QCheckBox *closeAfterApply{};
     QLineEdit *inputDirectory{};
     QLineEdit *exportDirectory{};
     QLineEdit *fileNameTemplate{};

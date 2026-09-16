@@ -36,6 +36,21 @@ QList<ScreenCrop> automaticScreens(const QPoint &topLeft, const QPoint &bottomRi
     QList<ScreenCrop> result;
     const auto screens = QApplication::screens();
     if (screens.isEmpty()) return result;
+    const auto preferences = AppSettings::loadMonitors();
+    if (preferences.enabled) {
+        const auto monitors = MonitorLayout::connectedMonitors();
+        const auto layout = MonitorLayout::rectangles(monitors, preferences);
+        QRectF bounds;
+        for (const auto &rect : layout) bounds = bounds.united(rect);
+        const double scale = bottomRight.isNull() ? 1.0
+            : qMin(bottomRight.x() / bounds.width(), bottomRight.y() / bounds.height());
+        for (int i = 0; i < monitors.size(); ++i) {
+            const QRectF crop(QPointF(topLeft) + (layout[i].topLeft() - bounds.topLeft()) * scale,
+                              layout[i].size() * scale);
+            result.append({screens[i]->name(), i + 1, monitors[i].desktopGeometry, crop.toAlignedRect()});
+        }
+        return result;
+    }
     for (int index = 0; index < screens.size(); ++index) {
         const QScreen *screen = screens.at(index);
         QRect crop = screen->geometry();

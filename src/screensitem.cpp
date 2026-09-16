@@ -12,8 +12,14 @@
 #include <QGraphicsView>
 #include "centeredtextitem.h"
 #include "screensitem.h"
+#include "appsettings.h"
 
-ScreensItem::ScreensItem(QGraphicsItem *parent) : QGraphicsItemGroup(parent) {
+ScreensItem::ScreensItem(QGraphicsItem *parent)
+    : ScreensItem(parent, MonitorLayout::connectedMonitors(), AppSettings::loadMonitors()) {}
+
+ScreensItem::ScreensItem(QGraphicsItem *parent, const QList<MonitorInfo> &monitors,
+                         const MonitorPreferences &preferences)
+    : QGraphicsItemGroup(parent), monitorList(monitors), preferences(preferences) {
     addScreens();
 
     // make the screen item movable by the user
@@ -26,34 +32,22 @@ ScreensItem::ScreensItem(QGraphicsItem *parent) : QGraphicsItemGroup(parent) {
 }
 
 void ScreensItem::addScreens() {
-    auto screens = QApplication::screens();
-
-    // Keep Qt's screen order consistent with splitImage() and applyWallpaper().
-    // Wallpaper assignment itself uses virtual-desktop geometry because Plasma
-    // may assign different numeric screen indices to the same displays.
-    for (int index = 0; index < screens.size(); ++index) {
-        const QScreen *screen = screens.at(index);
-        qDebug() << "Qt screen" << index << screen->name()
-                 << screen->geometry() << screen->model();
-    }
-
     // get the currently used color scheme
     const auto colorScheme = KColorScheme();
     const auto pen = QPen(colorScheme.foreground(KColorScheme::ForegroundRole::ActiveText), 10);
 
-    // draw a rectangle for every screen
-    std::for_each(screens.begin(), screens.end(), [&](const QScreen* screen){
-        const auto rect = new QGraphicsRectItem();
-        rect->setRect(screen->geometry());
+    const auto layout = MonitorLayout::rectangles(monitorList, preferences);
+    for (int index = 0; index < layout.size(); ++index) {
+        const auto rect = new QGraphicsRectItem(layout[index]);
         rect->setPen(pen);
         rect->setBrush(colorScheme.background(KColorScheme::BackgroundRole::ActiveBackground));
         rect->setOpacity(0.75);
         addToGroup(rect);
         rectangles.append(rect);
-
-        auto name = new CenteredTextItem(screen->model(), screen->geometry().center());
+        auto *name = new CenteredTextItem(monitorList[index].displayName.isEmpty()
+            ? monitorList[index].name : monitorList[index].displayName, layout[index].center());
         addToGroup(name);
-    });
+    }
 }
 
 const QList<QGraphicsRectItem *> &ScreensItem::getRectangles() const {
@@ -63,7 +57,7 @@ const QList<QGraphicsRectItem *> &ScreensItem::getRectangles() const {
 void ScreensItem::updateMaximumScale() {
     const QRectF screens = childrenBoundingRect();
     const QRectF image = parentItem()->boundingRect();
-    maxScale = qMin(image.width() / screens.width(), image.height() / screens.height());
+    maxScale = screens.isEmpty() ? 1.0 : qMin(image.width() / screens.width(), image.height() / screens.height());
 }
 
 QPointF ScreensItem::constrainedPosition(const QPointF &position) const {
@@ -163,7 +157,7 @@ QVariant ScreensItem::itemChange(QGraphicsItem::GraphicsItemChange change, const
             updateMaximumScale();
             qreal newScale = value.toDouble();
             if(newScale > maxScale) return maxScale;
-            if(newScale < 0.1) return 0.1;
+            if(newScale < qMin(0.1, maxScale)) return qMin(0.1, maxScale);
             break;
         }
     }
