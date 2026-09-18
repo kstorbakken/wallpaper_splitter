@@ -32,11 +32,26 @@ bool parsePoint(const QString &value, QPoint *point, QString *error) {
     return true;
 }
 
-QList<ScreenCrop> automaticScreens(const QPoint &topLeft, const QPoint &bottomRight) {
+QList<ScreenCrop> automaticScreens(const QPoint &topLeft, const QPoint &bottomRight,
+                                  const QSize &imageSize, bool largestFit) {
     QList<ScreenCrop> result;
     const auto screens = QApplication::screens();
     if (screens.isEmpty()) return result;
     const auto preferences = AppSettings::loadMonitors();
+    if (largestFit) {
+        const auto monitors = MonitorLayout::connectedMonitors();
+        const auto layout = MonitorLayout::rectangles(monitors, preferences);
+        QRectF bounds;
+        for (const auto &rect : layout) bounds = bounds.united(rect);
+        const QRect imageRect(QPoint(), imageSize);
+        const auto fit = MonitorLayout::largestFit(bounds, imageRect);
+        for (int i = 0; i < monitors.size(); ++i) {
+            const auto crop = fit.mapRect(layout[i]);
+            result.append({monitors[i].name, i + 1, monitors[i].desktopGeometry,
+                           crop.toAlignedRect().intersected(imageRect)});
+        }
+        return result;
+    }
     if (preferences.enabled) {
         const auto monitors = MonitorLayout::connectedMonitors();
         const auto layout = MonitorLayout::rectangles(monitors, preferences);
@@ -110,6 +125,10 @@ int main(int argc, char *argv[]) {
              QCoreApplication::translate("commandline", "width,height")},
             {QStringLiteral("apply"),
              QCoreApplication::translate("commandline", "Apply crops to the current Plasma activity.")},
+            {QStringLiteral("stretch-across-screens"),
+             QCoreApplication::translate("commandline", "Stretch the entire image across the combined monitor layout.")},
+            {QStringLiteral("fill-panorama"),
+             QCoreApplication::translate("commandline", "Fill all screens with one continuous image, preserving proportions.")},
             {QStringLiteral("filename-template"),
              QCoreApplication::translate("commandline", "Override the export filename template."),
              QCoreApplication::translate("commandline", "template")},
@@ -134,6 +153,17 @@ int main(int argc, char *argv[]) {
         return 2;
     }
 
+    if (parser.isSet(QStringLiteral("stretch-across-screens")) && parser.isSet(QStringLiteral("fill-panorama"))) {
+        std::cerr << "--stretch-across-screens and --fill-panorama cannot be combined.\n";
+        return 2;
+    }
+    if ((parser.isSet(QStringLiteral("stretch-across-screens")) || parser.isSet(QStringLiteral("fill-panorama")))
+        && (parser.isSet(QStringLiteral("top-left")) || parser.isSet(QStringLiteral("bottom-right")))) {
+        std::cerr << qPrintable(QCoreApplication::translate("commandline",
+                "Automatic layout options cannot be combined with --top-left or --bottom-right.")) << '\n';
+        return 2;
+    }
+
     QPoint topLeft;
     QPoint bottomRight;
     QString pointError;
@@ -149,17 +179,30 @@ int main(int argc, char *argv[]) {
     }
 
     const QFileInfo imageFile(arguments.constFirst());
-    const QImage image(imageFile.absoluteFilePath());
+    QImage image(imageFile.absoluteFilePath());
     if (image.isNull()) {
         std::cerr << qPrintable(QCoreApplication::translate(
                 "commandline", "Could not load input image: %1").arg(imageFile.absoluteFilePath())) << '\n';
         return 3;
     }
-    const QList<ScreenCrop> screens = automaticScreens(topLeft, bottomRight);
+    const QSize originalSize = image.size();
+    if (parser.isSet(QStringLiteral("stretch-across-screens")) || parser.isSet(QStringLiteral("fill-panorama"))) {
+        QRectF bounds;
+        const auto layout = MonitorLayout::rectangles(
+                MonitorLayout::connectedMonitors(), AppSettings::loadMonitors());
+        for (const auto &rect : layout) bounds = bounds.united(rect);
+        if (parser.isSet(QStringLiteral("fill-panorama")))
+            image = MonitorLayout::renderPanorama(image, layout);
+        else if (!bounds.isEmpty())
+            image = image.scaled(bounds.size().toSize(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+    const QList<ScreenCrop> screens = automaticScreens(topLeft, bottomRight, image.size(),
+            parser.isSet(QStringLiteral("stretch-across-screens")) ||
+            parser.isSet(QStringLiteral("fill-panorama")));
     OperationResult result;
     if (parser.isSet(QStringLiteral("apply"))) {
         DBusPlasmaApplicator applicator;
-        result = OutputService::applyManaged(image, image.size(), screens, imageFile.fileName(),
+        result = OutputService::applyManaged(image, originalSize, screens, imageFile.fileName(),
                                              imageFile.absoluteFilePath(), applicator);
     } else {
         const UserPreferences preferences = AppSettings::load();

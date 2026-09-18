@@ -20,6 +20,8 @@ public:
 
     const QList<QGraphicsRectItem *> &getRectangles() const;
     void constrainToParent();
+    QRectF layoutBounds() const;
+    void fitAsLargeAsPossible();
 
 private:
     ScalingMode scalingMode = ScalingMode::none;

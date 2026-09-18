@@ -4,8 +4,36 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QScreen>
+#include <QPainter>
 #include <cmath>
 #include <limits>
+
+QImage MonitorLayout::renderPanorama(const QImage &source, const QList<QRectF> &layout) {
+    if (source.isNull() || layout.isEmpty()) return {};
+    QRectF bounds;
+    for (const auto &rect : layout) {
+        if (rect.isEmpty()) return {};
+        bounds = bounds.united(rect);
+    }
+    QImage rendered(bounds.size().toSize(), QImage::Format_ARGB32_Premultiplied);
+    if (rendered.isNull()) return {};
+    rendered.fill(Qt::black);
+    // Fit the entire desktop into one proportional source crop. Drawing once
+    // preserves continuity across every screen and physical gap.
+    const QRectF target(rendered.rect());
+    const QRectF sourceCrop = largestFit(target, QRectF(source.rect())).mapRect(target);
+    QPainter painter(&rendered);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    painter.drawImage(target, source, sourceCrop);
+    return rendered;
+}
+
+QTransform MonitorLayout::largestFit(const QRectF &bounds, const QRectF &image) {
+    if (bounds.isEmpty() || image.isEmpty()) return {};
+    const qreal scale = qMin(image.width() / bounds.width(), image.height() / bounds.height());
+    const QPointF offset = image.center() - bounds.center() * scale;
+    return QTransform(scale, 0, 0, scale, offset.x(), offset.y());
+}
 
 QString MonitorLayout::identity(const QString &manufacturer, const QString &model,
                                 const QString &serial, const QString &connector) {

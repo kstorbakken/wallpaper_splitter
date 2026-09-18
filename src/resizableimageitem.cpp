@@ -50,7 +50,7 @@ private:
 }
 
 ResizableImageItem::ResizableImageItem(const QImage &image)
-        : QGraphicsPixmapItem(QPixmap::fromImage(image)), sourceImage(image), scaledImage(image) {
+        : QGraphicsPixmapItem(QPixmap::fromImage(image)), sourceImage(image), scaledImage(image), resizeSource(image) {
     frame = new QGraphicsRectItem(this);
     frame->setBrush(Qt::NoBrush);
     frame->setPen(QPen(Qt::white, 2, Qt::DashLine));
@@ -68,6 +68,35 @@ const QImage &ResizableImageItem::image() const {
 
 void ResizableImageItem::setScreenGroup(ScreensItem *screens) {
     screenGroup = screens;
+}
+
+void ResizableImageItem::restoreOriginal() {
+    resizeSource = sourceImage;
+    scaledImage = {};
+    setSize(sourceImage.size());
+    setPos(0, 0);
+}
+
+void ResizableImageItem::stretchToLayout() {
+    if (screenGroup == nullptr || screenGroup->layoutBounds().isEmpty()) return;
+    resizeSource = sourceImage;
+    scaledImage = {};
+    setSize(screenGroup->layoutBounds().size().toSize());
+    setPos(0, 0);
+    screenGroup->fitAsLargeAsPossible();
+}
+
+void ResizableImageItem::fillToLayout() {
+    if (screenGroup == nullptr) return;
+    QList<QRectF> layout;
+    for (const auto *rect : screenGroup->getRectangles()) layout.append(rect->rect());
+    const auto rendered = MonitorLayout::renderPanorama(sourceImage, layout);
+    if (rendered.isNull()) return;
+    resizeSource = rendered;
+    scaledImage = {};
+    setSize(rendered.size());
+    setPos(0, 0);
+    screenGroup->fitAsLargeAsPossible();
 }
 
 void ResizableImageItem::beginResize(Corner corner) {
@@ -92,13 +121,13 @@ void ResizableImageItem::resizeTo(const QPointF &scenePosition, bool keepAspectR
     const QSize minSize = minimumSize();
     QSize requestedSize(qMax(1, qRound(width)), qMax(1, qRound(height)));
     if (keepAspectRatio) {
-        const qreal requestedScale = qMax(width / sourceImage.width(), height / sourceImage.height());
+        const qreal requestedScale = qMax(width / resizeSource.width(), height / resizeSource.height());
         const qreal minimumScale = qMax(
-                static_cast<qreal>(minSize.width()) / sourceImage.width(),
-                static_cast<qreal>(minSize.height()) / sourceImage.height());
+                static_cast<qreal>(minSize.width()) / resizeSource.width(),
+                static_cast<qreal>(minSize.height()) / resizeSource.height());
         const qreal scale = qMax(requestedScale, minimumScale);
-        requestedSize = QSize(qMax(1, qRound(sourceImage.width() * scale)),
-                              qMax(1, qRound(sourceImage.height() * scale)));
+        requestedSize = QSize(qMax(1, qRound(resizeSource.width() * scale)),
+                              qMax(1, qRound(resizeSource.height() * scale)));
     } else {
         requestedSize.setWidth(qMax(requestedSize.width(), minSize.width()));
         requestedSize.setHeight(qMax(requestedSize.height(), minSize.height()));
@@ -114,7 +143,7 @@ void ResizableImageItem::resizeTo(const QPointF &scenePosition, bool keepAspectR
 
 QSize ResizableImageItem::minimumSize() const {
     if (screenGroup == nullptr) return QSize(1, 1);
-    const QSizeF size = screenGroup->mapRectToParent(screenGroup->boundingRect()).size();
+    const QSizeF size = screenGroup->mapRectToParent(screenGroup->layoutBounds()).size();
     return QSize(qCeil(size.width()), qCeil(size.height()));
 }
 
@@ -131,7 +160,7 @@ QPointF ResizableImageItem::cornerPosition(Corner corner) const {
 
 void ResizableImageItem::setSize(const QSize &size) {
     if (size == scaledImage.size()) return;
-    scaledImage = sourceImage.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    scaledImage = resizeSource.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     setPixmap(QPixmap::fromImage(scaledImage));
     updateHandles();
 }

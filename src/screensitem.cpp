@@ -26,7 +26,7 @@ ScreensItem::ScreensItem(QGraphicsItem *parent, const QList<MonitorInfo> &monito
     setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton);
     setFlag(ItemIsMovable);
     setFlag(ItemSendsGeometryChanges);
-    setTransformOriginPoint(boundingRect().center());
+    setTransformOriginPoint(layoutBounds().center());
 
     updateMaximumScale();
 }
@@ -55,13 +55,27 @@ const QList<QGraphicsRectItem *> &ScreensItem::getRectangles() const {
 }
 
 void ScreensItem::updateMaximumScale() {
-    const QRectF screens = childrenBoundingRect();
+    const QRectF screens = layoutBounds();
     const QRectF image = parentItem()->boundingRect();
     maxScale = screens.isEmpty() ? 1.0 : qMin(image.width() / screens.width(), image.height() / screens.height());
 }
 
+QRectF ScreensItem::layoutBounds() const {
+    QRectF bounds;
+    for (const auto *rectangle : rectangles) bounds = bounds.united(rectangle->rect());
+    return bounds;
+}
+
+void ScreensItem::fitAsLargeAsPossible() {
+    const QRectF bounds = layoutBounds();
+    if (bounds.isEmpty()) return;
+    const auto fit = MonitorLayout::largestFit(bounds, parentItem()->boundingRect());
+    setScale(fit.m11());
+    setPos(pos() + fit.mapRect(bounds).center() - mapRectToParent(bounds).center());
+}
+
 QPointF ScreensItem::constrainedPosition(const QPointF &position) const {
-    QRectF screens = mapRectToParent(boundingRect());
+    QRectF screens = mapRectToParent(layoutBounds());
     screens.translate(position - pos());
     const QRectF image = parentItem()->boundingRect();
     QPointF correction;

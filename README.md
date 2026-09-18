@@ -27,6 +27,7 @@ This is an overview of the currently supported functionality.
 - [x] Browse, reapply, rename, and delete saved wallpaper sets
 - [x] Remember input and export folders
 - [x] Account for physical monitor sizes and bezel gaps
+- [x] Stretch the entire source image across the combined monitor layout
 - [x] Adjust position
 - [x] Adjust scale*
 - [x] Zoom into the scene with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd>
@@ -46,6 +47,23 @@ originally filed in the original project's issue tracker.
    You can also zoom with <kbd>Ctrl</kbd> + <kbd>Mouse wheel</kbd> and pan the zoomed preview by holding the middle mouse button and dragging.
 3. Click <kbd>Export</kbd> to save user-owned crop files, or <kbd>Apply</kbd> to
    write a managed wallpaper set and use it on the current Plasma activity.
+
+Click the translucent stretch icon in the preview’s upper-right corner
+(**Stretch across screens**) to stretch the entire original image across the
+combined monitor layout, filling its width and height. This changes the image’s
+proportions when its aspect ratio differs from the layout. Monitor positions and
+physical bezel gaps are preserved; image content in gaps or outside the panels of
+an uneven arrangement remains hidden. You can still adjust the image and layout
+afterward. Click the active icon again to restore the original image and the
+monitor layout shown when it was first loaded.
+
+The adjacent outward-arrow icon, **Fill panorama**, scales one continuous image
+proportionally to fill the complete monitor arrangement. Excess content is cropped
+symmetrically at the top/bottom or sides; the image is never repeated or stretched.
+Monitor positions and physical bezel gaps stay intact. Both actions start from the
+original image. The active icon stays highlighted; click it again to return to
+the initially loaded view, or click the other icon to switch modes. Loading a
+new image clears the active mode.
 
 Use <kbd>Settings → General</kbd> to choose the remembered input and export folders, the
 export filename template, and what happens when an export already exists.
@@ -140,6 +158,19 @@ activity. Export-only options cannot be combined with `--apply`.
 ```sh
 wallpaper_splitter --apply wallpaper.jpg
 ```
+
+Add `--stretch-across-screens` to stretch the entire source image across the combined
+monitor layout, including when physical sizing is enabled:
+
+```sh
+wallpaper_splitter --stretch-across-screens --destination ~/Pictures/spanned wallpaper.jpg
+wallpaper_splitter --stretch-across-screens --apply wallpaper.jpg
+```
+
+Use `--fill-panorama` for a continuous, proportional panorama instead.
+The two automatic layout options cannot be combined with each other or with
+`--top-left` or `--bottom-right`. Without either option,
+the existing command-line positioning and sizing behavior is unchanged.
 
 ## ⚙️ How does it work
 
