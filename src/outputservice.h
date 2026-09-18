@@ -79,6 +79,10 @@ public:
                                        const QList<ScreenCrop> &screens,
                                        const QString &sourceName,
                                        const ExportOptions &options);
+    static OperationResult exportCrops(const QStringList &cropPaths,
+                                       const QList<ScreenCrop> &screens,
+                                       const QString &sourceName,
+                                       const ExportOptions &options);
     static OperationResult applyManaged(const QImage &image,
                                         const QSize &originalSize,
                                         const QList<ScreenCrop> &screens,

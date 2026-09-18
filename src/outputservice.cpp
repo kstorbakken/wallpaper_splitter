@@ -140,6 +140,46 @@ bool anyExists(const QString &directory, const QStringList &names) {
     });
 }
 
+OperationResult exportArtifacts(const QList<CropArtifact> &artifacts,
+                                const QString &sourceName,
+                                const ExportOptions &options) {
+    if (options.directory.isEmpty()) {
+        return OperationResult::failure(OperationError::Arguments,
+                                        QObject::tr("No export directory was selected."));
+    }
+    QStringList names;
+    OperationResult result = expandNames(artifacts, sourceName, options.fileNameTemplate, 0, &names);
+    if (!result.success) return result;
+    if (!QDir().mkpath(options.directory)) {
+        return OperationResult::failure(OperationError::FileSystem,
+                                        QObject::tr("Could not create export directory %1.")
+                                                .arg(options.directory));
+    }
+    const bool collision = anyExists(options.directory, names);
+    if (collision && (options.collisionPolicy == CollisionPolicy::Ask
+                      || options.collisionPolicy == CollisionPolicy::Fail)) {
+        return OperationResult::failure(OperationError::Collision,
+                                        QObject::tr("One or more export files already exist."));
+    }
+    if (collision && options.collisionPolicy == CollisionPolicy::Revision) {
+        int revision = 2;
+        do {
+            result = expandNames(artifacts, sourceName, options.fileNameTemplate, revision++, &names);
+            if (!result.success) return result;
+        } while (anyExists(options.directory, names));
+    }
+
+    QStringList paths;
+    const QDir directory(options.directory);
+    for (int index = 0; index < artifacts.size(); ++index) {
+        const QString path = directory.filePath(names.at(index));
+        result = writeImage(artifacts.at(index).image, path);
+        if (!result.success) return OperationResult::failure(result.error, result.message, paths);
+        paths.append(path);
+    }
+    return OperationResult::ok(paths);
+}
+
 QJsonObject rectangleJson(const QRect &rectangle) {
     return {{QStringLiteral("x"), rectangle.x()},
             {QStringLiteral("y"), rectangle.y()},
@@ -270,41 +310,28 @@ OperationResult OutputService::exportCrops(const QImage &image,
     QList<CropArtifact> artifacts;
     OperationResult result = createCrops(image, screens, &artifacts);
     if (!result.success) return result;
-    if (options.directory.isEmpty()) {
-        return OperationResult::failure(OperationError::Arguments,
-                                        QObject::tr("No export directory was selected."));
-    }
-    QStringList names;
-    result = expandNames(artifacts, sourceName, options.fileNameTemplate, 0, &names);
-    if (!result.success) return result;
-    if (!QDir().mkpath(options.directory)) {
-        return OperationResult::failure(OperationError::FileSystem,
-                                        QObject::tr("Could not create export directory %1.")
-                                                .arg(options.directory));
-    }
-    const bool collision = anyExists(options.directory, names);
-    if (collision && (options.collisionPolicy == CollisionPolicy::Ask
-                      || options.collisionPolicy == CollisionPolicy::Fail)) {
-        return OperationResult::failure(OperationError::Collision,
-                                        QObject::tr("One or more export files already exist."));
-    }
-    if (collision && options.collisionPolicy == CollisionPolicy::Revision) {
-        int revision = 2;
-        do {
-            result = expandNames(artifacts, sourceName, options.fileNameTemplate, revision++, &names);
-            if (!result.success) return result;
-        } while (anyExists(options.directory, names));
-    }
+    return exportArtifacts(artifacts, sourceName, options);
+}
 
-    QStringList paths;
-    const QDir directory(options.directory);
-    for (int index = 0; index < artifacts.size(); ++index) {
-        const QString path = directory.filePath(names.at(index));
-        result = writeImage(artifacts.at(index).image, path);
-        if (!result.success) return OperationResult::failure(result.error, result.message, paths);
-        paths.append(path);
+OperationResult OutputService::exportCrops(const QStringList &cropPaths,
+                                           const QList<ScreenCrop> &screens,
+                                           const QString &sourceName,
+                                           const ExportOptions &options) {
+    if (cropPaths.isEmpty() || cropPaths.size() != screens.size()) {
+        return OperationResult::failure(OperationError::ImageLayout,
+                                        QObject::tr("The saved set has an incomplete crop mapping."));
     }
-    return OperationResult::ok(paths);
+    QList<CropArtifact> artifacts;
+    for (int index = 0; index < cropPaths.size(); ++index) {
+        const QImage crop(cropPaths.at(index));
+        if (crop.isNull() || crop.size() != screens.at(index).cropRect.size()) {
+            return OperationResult::failure(
+                    OperationError::FileSystem,
+                    QObject::tr("A generated image is missing, unreadable, or has changed dimensions."));
+        }
+        artifacts.append({screens.at(index), crop, cropDigest(crop)});
+    }
+    return exportArtifacts(artifacts, sourceName, options);
 }
 
 OperationResult OutputService::applyManaged(const QImage &image,

@@ -6,6 +6,7 @@ class QListWidget;
 class QLabel;
 class QPlainTextEdit;
 class QPushButton;
+class QCheckBox;
 
 class SetLibraryDialog : public QDialog {
 public:
@@ -17,11 +18,16 @@ private:
     QLabel *previewLabel;
     QLabel *status;
     QPlainTextEdit *details;
+    QCheckBox *selectAllCheckBox;
     QPushButton *applyButton;
+    QPushButton *exportButton;
     QPushButton *renameButton;
     QPushButton *deleteButton;
     void refresh(const QString &selectedId = {});
     void select();
+    void updateBulkControls();
+    QStringList checkedIds() const;
+    QStringList actionIds() const;
     void report(const OperationResult &result);
 };
 #endif

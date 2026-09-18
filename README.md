@@ -76,7 +76,9 @@ Templates support `{source}`, `{screen}`, `{number}`, `{revision}`, and
 Use <kbd>Library</kbd> to browse applied sets, with a preview, source image path,
 creation time, monitor layout, crop mappings, and generated file paths. Reapply
 requires the saved monitor positions and resolutions to match the current layout;
-the original source image is not needed. Renaming changes the library label.
+the original source image is not needed. Export saves a set's existing crops using
+the configured export folder, filename template, and collision handling, without
+reopening or recropping the source. Renaming changes the library label.
 Deletion removes only managed files and is blocked while Plasma references a set
 on any activity, or when those references cannot be checked. Switch those activities
 to another wallpaper before deleting. Exports and source images are kept.

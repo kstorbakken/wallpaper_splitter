@@ -729,6 +729,18 @@ void SplitImageTest::libraryReappliesAndPreservesMetadata() {
     set = library.sets().first();
     QCOMPARE(set.name, "Evening");
     QCOMPARE(set.manifest.value("createdAt"), createdAt);
+    QTemporaryDir exportDirectory;
+    ExportOptions exportOptions{exportDirectory.path(), "{source}-{number}", CollisionPolicy::Ask};
+    auto exported = library.exportSet(set.id, exportOptions);
+    QVERIFY2(exported.success, qPrintable(exported.message));
+    QCOMPARE(exported.paths.size(), 2);
+    QCOMPARE(QFileInfo(exported.paths[0]).fileName(), "red-1.png");
+    QCOMPARE(QImage(exported.paths[0]).pixelColor(5, 5), QColor(Qt::red));
+    QVERIFY(!library.exportSet(set.id, exportOptions).success);
+    exportOptions.collisionPolicy = CollisionPolicy::Revision;
+    exported = library.exportSet(set.id, exportOptions);
+    QVERIFY(exported.success);
+    QCOMPARE(QFileInfo(exported.paths[0]).fileName(), "red-1-r2.png");
     plasma.called = false;
     QVERIFY(!library.reapply(set.id, {QRect(0, 0, 20, 10)}, plasma).success);
     QVERIFY(!plasma.called);
@@ -828,6 +840,9 @@ void SplitImageTest::libraryDialogShowsSets() {
     QTemporaryDir root;
     SetLibraryDialog empty(nullptr, root.path());
     QCOMPARE(empty.findChild<QListWidget *>("setList")->count(), 0);
+    auto *emptySelectAll = empty.findChild<QCheckBox *>("selectAllSets");
+    QVERIFY(emptySelectAll);
+    QVERIFY(!emptySelectAll->isEnabled());
     QImage image(10, 10, QImage::Format_RGB32);
     image.fill(Qt::green);
     FakePlasmaApplicator plasma(true);
@@ -837,6 +852,56 @@ void SplitImageTest::libraryDialogShowsSets() {
     auto *list = populated.findChild<QListWidget *>("setList");
     QCOMPARE(list->count(), 1);
     QCOMPARE(list->currentItem()->text(), "green.png");
+    QCOMPARE(list->currentItem()->checkState(), Qt::Unchecked);
+    auto *selectAll = populated.findChild<QCheckBox *>("selectAllSets");
+    auto *deleteSelected = populated.findChild<QPushButton *>("deleteSelectedSets");
+    auto *rename = populated.findChild<QPushButton *>("renameSet");
+    auto *exportSet = populated.findChild<QPushButton *>("exportSet");
+    QVERIFY(selectAll);
+    QVERIFY(deleteSelected);
+    QVERIFY(rename);
+    QVERIFY(exportSet);
+    QVERIFY(deleteSelected->isEnabled());
+    QVERIFY(rename->isEnabled());
+    QVERIFY(exportSet->isEnabled());
+    QCOMPARE(deleteSelected->text(), "Delete");
+    selectAll->click();
+    QCOMPARE(list->currentItem()->checkState(), Qt::Checked);
+    QVERIFY(deleteSelected->isEnabled());
+    QCOMPARE(deleteSelected->text(), "Delete selected (1)");
+    list->currentItem()->setCheckState(Qt::Unchecked);
+    QCOMPARE(selectAll->checkState(), Qt::Unchecked);
+    QVERIFY(deleteSelected->isEnabled());
+    QCOMPARE(deleteSelected->text(), "Delete");
+
+    image.fill(Qt::blue);
+    QVERIFY(OutputService::applyManaged(image, image.size(),
+        {{"screen", 1, image.rect(), image.rect()}}, "blue.png", {}, plasma, root.path()).success);
+    SetLibraryDialog multiple(nullptr, root.path());
+    list = multiple.findChild<QListWidget *>("setList");
+    selectAll = multiple.findChild<QCheckBox *>("selectAllSets");
+    deleteSelected = multiple.findChild<QPushButton *>("deleteSelectedSets");
+    rename = multiple.findChild<QPushButton *>("renameSet");
+    exportSet = multiple.findChild<QPushButton *>("exportSet");
+    QCOMPARE(list->count(), 2);
+    list->item(0)->setCheckState(Qt::Checked);
+    QCOMPARE(selectAll->checkState(), Qt::PartiallyChecked);
+    QCOMPARE(deleteSelected->text(), "Delete selected (1)");
+    selectAll->click();
+    QCOMPARE(list->item(0)->checkState(), Qt::Checked);
+    QCOMPARE(list->item(1)->checkState(), Qt::Checked);
+    QCOMPARE(deleteSelected->text(), "Delete selected (2)");
+    QVERIFY(!rename->isEnabled());
+    QVERIFY(!exportSet->isEnabled());
+    selectAll->click();
+    QCOMPARE(list->item(0)->checkState(), Qt::Unchecked);
+    QCOMPARE(list->item(1)->checkState(), Qt::Unchecked);
+    QVERIFY(deleteSelected->isEnabled());
+    QVERIFY(rename->isEnabled());
+    QVERIFY(exportSet->isEnabled());
+    list->setCurrentRow(list->currentRow() == 0 ? 1 : 0);
+    QVERIFY(deleteSelected->isEnabled());
+    QVERIFY(rename->isEnabled());
 }
 
 void SplitImageTest::physicalLayoutCompensatesForPixelDensity() {
