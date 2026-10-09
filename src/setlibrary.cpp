@@ -143,6 +143,15 @@ OperationResult SetLibrary::reapply(const QString &id, const QList<QRect> &layou
     return saved.success ? result : saved;
 }
 
+OperationResult SetLibrary::exportSet(const QString &id, const ExportOptions &options) const {
+    WallpaperSet set;
+    const auto result = load(id, &set);
+    if (!result.success) return result;
+    if (!set.problem.isEmpty()) return failure(set.problem);
+    const QString sourceName = set.manifest.value("sourceName").toString(set.name);
+    return OutputService::exportCrops(set.paths, set.screens, sourceName, options);
+}
+
 OperationResult SetLibrary::remove(const QString &id, PlasmaApplicator &applicator) const {
     WallpaperSet set;
     auto result = load(id, &set);

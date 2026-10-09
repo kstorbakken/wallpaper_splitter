@@ -134,7 +134,13 @@ int main(int argc, char *argv[]) {
              QCoreApplication::translate("commandline", "template")},
             {QStringLiteral("collision"),
              QCoreApplication::translate("commandline", "Collision mode: fail, replace, or revision."),
-             QCoreApplication::translate("commandline", "mode")}});
+             QCoreApplication::translate("commandline", "mode")},
+            {QStringLiteral("format"),
+             QCoreApplication::translate("commandline", "Output format: automatic, jpeg, or png."),
+             QCoreApplication::translate("commandline", "format")},
+            {QStringLiteral("jpeg-quality"),
+             QCoreApplication::translate("commandline", "JPEG quality from 1 to 100."),
+             QCoreApplication::translate("commandline", "quality")}});
     parser.process(app);
 
     const QStringList arguments = parser.positionalArguments();
@@ -146,9 +152,11 @@ int main(int argc, char *argv[]) {
     if (parser.isSet(QStringLiteral("apply"))
         && (parser.isSet(QStringLiteral("destination"))
             || parser.isSet(QStringLiteral("filename-template"))
-            || parser.isSet(QStringLiteral("collision")))) {
+            || parser.isSet(QStringLiteral("collision"))
+            || parser.isSet(QStringLiteral("format"))
+            || parser.isSet(QStringLiteral("jpeg-quality")))) {
         std::cerr << qPrintable(QCoreApplication::translate(
-                "commandline", "--destination, --filename-template, and --collision cannot be used with --apply."))
+                "commandline", "Export options cannot be used with --apply."))
                   << '\n';
         return 2;
     }
@@ -217,6 +225,8 @@ int main(int argc, char *argv[]) {
                 ? parser.value(QStringLiteral("filename-template")) : preferences.fileNameTemplate;
         options.collisionPolicy = preferences.collisionPolicy == CollisionPolicy::Ask
                 ? CollisionPolicy::Fail : preferences.collisionPolicy;
+        options.format = preferences.outputFormat;
+        options.jpegQuality = preferences.jpegQuality;
         if (parser.isSet(QStringLiteral("collision"))
             && (!OutputService::parseCollisionPolicy(parser.value(QStringLiteral("collision")),
                                                      &options.collisionPolicy)
@@ -224,6 +234,23 @@ int main(int argc, char *argv[]) {
             std::cerr << qPrintable(QCoreApplication::translate(
                     "commandline", "--collision must be fail, replace, or revision.")) << '\n';
             return 2;
+        }
+        if (parser.isSet(QStringLiteral("format"))
+            && !OutputService::parseOutputFormat(parser.value(QStringLiteral("format")),
+                                                 &options.format)) {
+            std::cerr << qPrintable(QCoreApplication::translate(
+                    "commandline", "--format must be automatic, jpeg, or png.")) << '\n';
+            return 2;
+        }
+        if (parser.isSet(QStringLiteral("jpeg-quality"))) {
+            bool validQuality = false;
+            const int quality = parser.value(QStringLiteral("jpeg-quality")).toInt(&validQuality);
+            if (!validQuality || quality < 1 || quality > 100) {
+                std::cerr << qPrintable(QCoreApplication::translate(
+                        "commandline", "--jpeg-quality must be between 1 and 100.")) << '\n';
+                return 2;
+            }
+            options.jpegQuality = quality;
         }
         result = OutputService::exportCrops(image, screens, imageFile.fileName(), options);
     }

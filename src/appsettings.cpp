@@ -29,6 +29,8 @@ void migrateLegacySettings(QSettings &settings) {
             QStringLiteral("folders/export"),
             QStringLiteral("output/fileNameTemplate"),
             QStringLiteral("output/collisionPolicy"),
+            QStringLiteral("output/format"),
+            QStringLiteral("output/jpegQuality"),
     };
     for (const QString &key : keys) {
         if (!settings.contains(key) && legacy.contains(key)) {
@@ -54,6 +56,14 @@ UserPreferences AppSettings::load() {
                 &policy)) {
         preferences.collisionPolicy = policy;
     }
+    OutputFormat format;
+    if (OutputService::parseOutputFormat(
+                settings.value(QStringLiteral("output/format"), QStringLiteral("automatic")).toString(),
+                &format)) {
+        preferences.outputFormat = format;
+    }
+    preferences.jpegQuality = qBound(1, settings.value(
+            QStringLiteral("output/jpegQuality"), 90).toInt(), 100);
     return preferences;
 }
 
@@ -66,6 +76,9 @@ void AppSettings::save(const UserPreferences &preferences) {
     settings.setValue(QStringLiteral("output/fileNameTemplate"), preferences.fileNameTemplate);
     settings.setValue(QStringLiteral("output/collisionPolicy"),
                       OutputService::collisionPolicyName(preferences.collisionPolicy));
+    settings.setValue(QStringLiteral("output/format"),
+                      OutputService::outputFormatName(preferences.outputFormat));
+    settings.setValue(QStringLiteral("output/jpegQuality"), preferences.jpegQuality);
 }
 
 void AppSettings::reset() {

@@ -18,6 +18,7 @@ enum class OperationError {
 };
 
 enum class CollisionPolicy { Ask, Fail, Replace, Revision };
+enum class OutputFormat { Automatic, Jpeg, Png };
 
 struct OperationResult {
     bool success{false};
@@ -42,12 +43,15 @@ struct CropArtifact {
     ScreenCrop screen;
     QImage image;
     QString digest;
+    QString encodedPath;
 };
 
 struct ExportOptions {
     QString directory;
     QString fileNameTemplate{QStringLiteral("{source}-{number}")};
     CollisionPolicy collisionPolicy{CollisionPolicy::Ask};
+    OutputFormat format{OutputFormat::Automatic};
+    int jpegQuality{90};
 };
 
 class PlasmaApplicator {
@@ -79,6 +83,10 @@ public:
                                        const QList<ScreenCrop> &screens,
                                        const QString &sourceName,
                                        const ExportOptions &options);
+    static OperationResult exportCrops(const QStringList &cropPaths,
+                                       const QList<ScreenCrop> &screens,
+                                       const QString &sourceName,
+                                       const ExportOptions &options);
     static OperationResult applyManaged(const QImage &image,
                                         const QSize &originalSize,
                                         const QList<ScreenCrop> &screens,
@@ -91,6 +99,8 @@ public:
     static OperationResult validateFileNameTemplate(const QString &fileNameTemplate);
     static QString collisionPolicyName(CollisionPolicy policy);
     static bool parseCollisionPolicy(const QString &value, CollisionPolicy *policy);
+    static QString outputFormatName(OutputFormat format);
+    static bool parseOutputFormat(const QString &value, OutputFormat *format);
 };
 
 #endif

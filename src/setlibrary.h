@@ -22,6 +22,7 @@ public:
     OperationResult rename(const QString &id, const QString &name) const;
     OperationResult reapply(const QString &id, const QList<QRect> &layout,
                             PlasmaApplicator &applicator) const;
+    OperationResult exportSet(const QString &id, const ExportOptions &options) const;
     OperationResult remove(const QString &id, PlasmaApplicator &applicator) const;
     static QImage preview(const WallpaperSet &set, const QSize &size);
 private:
