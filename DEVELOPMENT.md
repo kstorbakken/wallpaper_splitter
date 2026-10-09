@@ -43,7 +43,7 @@ written to the ignored `packages/` directory:
 On an Arch Linux host, install or upgrade the printed artifact with:
 
 ```sh
-sudo pacman -U packages/wallpaper_splitter-1.3.0-2-x86_64.pkg.tar.zst
+sudo pacman -U packages/wallpaper_splitter-1.4.0-1-x86_64.pkg.tar.zst
 ```
 
 This local test-package workflow is separate from the packages created for

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(wallpaper_splitter VERSION 1.3.0 LANGUAGES CXX)
+project(wallpaper_splitter VERSION 1.4.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
