@@ -10,6 +10,8 @@ struct UserPreferences {
     QString exportDirectory;
     QString fileNameTemplate{QStringLiteral("{source}-{number}")};
     CollisionPolicy collisionPolicy{CollisionPolicy::Ask};
+    OutputFormat outputFormat{OutputFormat::Automatic};
+    int jpegQuality{90};
 };
 
 class AppSettings {

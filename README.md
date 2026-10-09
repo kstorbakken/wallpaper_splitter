@@ -66,7 +66,10 @@ the initially loaded view, or click the other icon to switch modes. Loading a
 new image clears the active mode.
 
 Use <kbd>Settings → General</kbd> to choose the remembered input and export folders, the
-export filename template, and what happens when an export already exists.
+export filename template, image format and JPEG quality, and what happens when an export
+already exists. Automatic format keeps PNG sources lossless, uses high-quality JPEG for
+opaque photographic sources, and always uses PNG when transparency is present. The source
+image is never modified.
 Uncheck **Close the app after successfully applying a wallpaper set** to keep
 the window open for further adjustments after Apply. This preference is remembered;
 closing after Apply is enabled by default.
@@ -152,7 +155,11 @@ files are written to an `<image>_split` directory beside the source image.
 wallpaper_splitter --destination ~/Pictures/spanned wallpaper.jpg
 wallpaper_splitter --filename-template '{source}-{screen}' \
   --collision revision wallpaper.jpg
+wallpaper_splitter --format png --destination ~/Pictures/lossless wallpaper.jpg
 ```
+
+`--format` accepts `automatic`, `jpeg`, or `png`. Use `--jpeg-quality` with a value
+from 1 to 100 to override the saved JPEG quality.
 
 Use `--apply` to write a managed set and apply it to the current Plasma
 activity. Export-only options cannot be combined with `--apply`.

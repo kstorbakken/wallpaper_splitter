@@ -8,6 +8,7 @@
 #include <QGraphicsTextItem>
 #include <QGraphicsView>
 #include <QImage>
+#include <QImageReader>
 #include <QGraphicsScene>
 #include <QPainter>
 #include <QProcess>
@@ -77,6 +78,7 @@ private slots:
     void footerControlsStayGroupedWhenWindowWidens();
     void monitorLabelRemainsCenteredAtDifferentZoomLevels();
     void validatesFilenameTemplates();
+    void selectsAutomaticOutputFormats();
     void handlesSetWideExportCollisions();
     void persistsOutputSettings();
     void outputSettingsDialogHasRoomyDefaultSize();
@@ -486,6 +488,42 @@ void SplitImageTest::validatesFilenameTemplates() {
     QVERIFY(!OutputService::validateFileNameTemplate(QStringLiteral("{source}")).success);
 }
 
+void SplitImageTest::selectsAutomaticOutputFormats() {
+    QTemporaryDir output;
+    QVERIFY(output.isValid());
+    const QList<ScreenCrop> screen{{"screen", 1, QRect(0, 0, 20, 10), QRect(0, 0, 20, 10)}};
+    ExportOptions options{output.path(), "opaque", CollisionPolicy::Fail};
+
+    QImage opaque(20, 10, QImage::Format_RGB32);
+    opaque.fill(Qt::blue);
+    auto result = OutputService::exportCrops(opaque, screen, "source.jpg", options);
+    QVERIFY2(result.success, qPrintable(result.message));
+    QVERIFY(result.paths.first().endsWith(".jpg"));
+    QCOMPARE(QImageReader(result.paths.first()).format().toLower(), QByteArray("jpeg"));
+
+    options.fileNameTemplate = "opaque-png";
+    result = OutputService::exportCrops(opaque, screen, "source.PNG", options);
+    QVERIFY2(result.success, qPrintable(result.message));
+    QCOMPARE(QImageReader(result.paths.first()).format().toLower(), QByteArray("png"));
+    QCOMPARE(QImage(result.paths.first()).pixelColor(1, 1), QColor(Qt::blue));
+
+    QImage transparent(20, 10, QImage::Format_ARGB32);
+    transparent.fill(Qt::transparent);
+    options.fileNameTemplate = "transparent";
+    result = OutputService::exportCrops(transparent, screen, "source.webp", options);
+    QVERIFY2(result.success, qPrintable(result.message));
+    QVERIFY(result.paths.first().endsWith(".png"));
+    QCOMPARE(QImageReader(result.paths.first()).format().toLower(), QByteArray("png"));
+    QCOMPARE(QImage(result.paths.first()).pixelColor(1, 1).alpha(), 0);
+
+    options.fileNameTemplate = "lossless";
+    options.format = OutputFormat::Png;
+    result = OutputService::exportCrops(opaque, screen, "source.jpg", options);
+    QVERIFY2(result.success, qPrintable(result.message));
+    QVERIFY(result.paths.first().endsWith(".png"));
+    QCOMPARE(QImage(result.paths.first()).pixelColor(1, 1), QColor(Qt::blue));
+}
+
 void SplitImageTest::handlesSetWideExportCollisions() {
     QImage source(20, 10, QImage::Format_RGB32);
     source.fill(Qt::blue);
@@ -500,7 +538,7 @@ void SplitImageTest::handlesSetWideExportCollisions() {
     OperationResult result = OutputService::exportCrops(source, screens,
                                                         QStringLiteral("lake.jpg"), options);
     QVERIFY2(result.success, qPrintable(result.message));
-    QCOMPARE(QFileInfo(result.paths.at(0)).fileName(), QStringLiteral("lake-1.png"));
+    QCOMPARE(QFileInfo(result.paths.at(0)).fileName(), QStringLiteral("lake-1.jpg"));
     result = OutputService::exportCrops(source, screens, QStringLiteral("lake.jpg"), options);
     QCOMPARE(result.error, OperationError::Collision);
     options.collisionPolicy = CollisionPolicy::Ask;
@@ -517,13 +555,13 @@ void SplitImageTest::handlesSetWideExportCollisions() {
     options.collisionPolicy = CollisionPolicy::Revision;
     result = OutputService::exportCrops(source, screens, QStringLiteral("lake.jpg"), options);
     QVERIFY2(result.success, qPrintable(result.message));
-    QCOMPARE(QFileInfo(result.paths.at(0)).fileName(), QStringLiteral("lake-1-r2.png"));
+    QCOMPARE(QFileInfo(result.paths.at(0)).fileName(), QStringLiteral("lake-1-r2.jpg"));
     QVERIFY(QFileInfo::exists(output.filePath(QStringLiteral("notes.txt"))));
 
     options.fileNameTemplate = QStringLiteral("{source}{revision}-{number}");
     result = OutputService::exportCrops(source, screens, QStringLiteral("lake.jpg"), options);
     QVERIFY2(result.success, qPrintable(result.message));
-    QCOMPARE(QFileInfo(result.paths.at(0)).fileName(), QStringLiteral("lake-r2-1.png"));
+    QCOMPARE(QFileInfo(result.paths.at(0)).fileName(), QStringLiteral("lake-r2-1.jpg"));
 }
 
 void SplitImageTest::persistsOutputSettings() {
@@ -536,6 +574,8 @@ void SplitImageTest::persistsOutputSettings() {
     QVERIFY(defaults.closeAfterApply);
     QCOMPARE(defaults.fileNameTemplate, QStringLiteral("{source}-{number}"));
     QCOMPARE(defaults.collisionPolicy, CollisionPolicy::Ask);
+    QCOMPARE(defaults.outputFormat, OutputFormat::Automatic);
+    QCOMPARE(defaults.jpegQuality, 90);
     const UserPreferences original = AppSettings::load();
     UserPreferences expected;
     expected.closeAfterApply = false;
@@ -543,6 +583,8 @@ void SplitImageTest::persistsOutputSettings() {
     expected.exportDirectory = QStringLiteral("/tmp/export-wallpapers");
     expected.fileNameTemplate = QStringLiteral("{screen}-{number}{revision}");
     expected.collisionPolicy = CollisionPolicy::Revision;
+    expected.outputFormat = OutputFormat::Png;
+    expected.jpegQuality = 91;
     AppSettings::save(expected);
 
     const UserPreferences actual = AppSettings::load();
@@ -551,6 +593,8 @@ void SplitImageTest::persistsOutputSettings() {
     QCOMPARE(actual.exportDirectory, expected.exportDirectory);
     QCOMPARE(actual.fileNameTemplate, expected.fileNameTemplate);
     QCOMPARE(actual.collisionPolicy, expected.collisionPolicy);
+    QCOMPARE(actual.outputFormat, expected.outputFormat);
+    QCOMPARE(actual.jpegQuality, expected.jpegQuality);
     AppSettings::reset();
     QVERIFY(AppSettings::load().closeAfterApply);
     AppSettings::save(original);
@@ -558,8 +602,8 @@ void SplitImageTest::persistsOutputSettings() {
 
 void SplitImageTest::outputSettingsDialogHasRoomyDefaultSize() {
     SettingsDialog dialog(UserPreferences{});
-    QCOMPARE(dialog.size(), QSize(650, 360));
-    QCOMPARE(dialog.minimumSize(), QSize(560, 300));
+    QCOMPARE(dialog.size(), QSize(650, 430));
+    QCOMPARE(dialog.minimumSize(), QSize(560, 360));
 }
 
 void SplitImageTest::migratesLegacySettingsToNeutralNamespace() {
@@ -602,10 +646,11 @@ void SplitImageTest::writesManagedManifestAndRetainsFailures() {
 
     FakePlasmaApplicator success(true);
     OperationResult result = OutputService::applyManaged(
-            source, source.size(), screens, QStringLiteral("forest.png"),
-            QStringLiteral("/pictures/forest.png"), success, managedRoot.path());
+            source, source.size(), screens, QStringLiteral("forest.jpg"),
+            QStringLiteral("/pictures/forest.jpg"), success, managedRoot.path());
     QVERIFY2(result.success, qPrintable(result.message));
     QVERIFY(success.called);
+    QVERIFY(result.paths.at(0).endsWith(QStringLiteral(".jpg")));
     QVERIFY(QFileInfo::exists(result.manifestPath));
     QFile manifestFile(result.manifestPath);
     QVERIFY(manifestFile.open(QIODevice::ReadOnly));
@@ -613,13 +658,13 @@ void SplitImageTest::writesManagedManifestAndRetainsFailures() {
     QCOMPARE(manifest.value(QStringLiteral("schemaVersion")).toInt(), 1);
     QCOMPARE(manifest.value(QStringLiteral("status")).toString(), QStringLiteral("applied"));
     QCOMPARE(manifest.value(QStringLiteral("sourcePath")).toString(),
-             QStringLiteral("/pictures/forest.png"));
+             QStringLiteral("/pictures/forest.jpg"));
     QCOMPARE(manifest.value(QStringLiteral("crops")).toArray().size(), 2);
     manifestFile.close();
 
     FakePlasmaApplicator failure(false);
     result = OutputService::applyManaged(
-            source, source.size(), screens, QStringLiteral("forest.png"), {}, failure,
+            source, source.size(), screens, QStringLiteral("forest.jpg"), {}, failure,
             managedRoot.path());
     QVERIFY(!result.success);
     QCOMPARE(result.error, OperationError::Plasma);
@@ -736,6 +781,11 @@ void SplitImageTest::libraryReappliesAndPreservesMetadata() {
     QCOMPARE(exported.paths.size(), 2);
     QCOMPARE(QFileInfo(exported.paths[0]).fileName(), "red-1.png");
     QCOMPARE(QImage(exported.paths[0]).pixelColor(5, 5), QColor(Qt::red));
+    QFile managedCrop(set.paths[0]);
+    QFile exportedCrop(exported.paths[0]);
+    QVERIFY(managedCrop.open(QIODevice::ReadOnly));
+    QVERIFY(exportedCrop.open(QIODevice::ReadOnly));
+    QCOMPARE(exportedCrop.readAll(), managedCrop.readAll());
     QVERIFY(!library.exportSet(set.id, exportOptions).success);
     exportOptions.collisionPolicy = CollisionPolicy::Revision;
     exported = library.exportSet(set.id, exportOptions);
@@ -940,7 +990,11 @@ void SplitImageTest::physicalLayoutCompensatesForPixelDensity() {
     QCOMPARE(saved.screens[1].cropRect, QRect(400, 0, 400, 200));
     QCOMPARE(saved.screens[1].desktopGeometry, monitors[1].desktopGeometry);
     // Preview must use physical crop proportions, even though the second desktop is twice as wide.
-    QCOMPARE(SetLibrary::preview(saved, QSize(800, 200)).pixelColor(400, 100), image.pixelColor(400, 100));
+    const QColor previewColor = SetLibrary::preview(saved, QSize(800, 200)).pixelColor(400, 100);
+    const QColor sourceColor = image.pixelColor(400, 100);
+    QVERIFY(qAbs(previewColor.red() - sourceColor.red()) <= 2);
+    QVERIFY(qAbs(previewColor.green() - sourceColor.green()) <= 2);
+    QVERIFY(qAbs(previewColor.blue() - sourceColor.blue()) <= 2);
     preferences.measurements["b"].position = {-105, -10};
     layout = MonitorLayout::rectangles(monitors, preferences);
     QCOMPARE(layout[1].topLeft(), QPointF(-420, -40));
@@ -1047,7 +1101,7 @@ void SplitImageTest::commandLineUsesPhysicalMeasurements() {
     process.setProcessEnvironment(environment);
     process.setProgram(QCoreApplication::applicationDirPath() + "/wallpaper_splitter");
     process.setArguments({"--destination", output, "--bottom-right", "300,200",
-                          "--collision", "replace", sourcePath});
+                          "--collision", "replace", "--format", "png", sourcePath});
     process.start();
     QVERIFY(process.waitForFinished());
     QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
@@ -1184,14 +1238,14 @@ void SplitImageTest::commandLineLargestFit() {
     process.setProcessEnvironment(environment);
     process.setProgram(QCoreApplication::applicationDirPath() + "/wallpaper_splitter");
     const QString output = temporary.filePath("output");
-    process.setArguments({"--stretch-across-screens", "--destination", output,
+    process.setArguments({"--stretch-across-screens", "--destination", output, "--format", "png",
                           "--filename-template", "{source}-{number}", sourcePath});
     process.start();
     QVERIFY(process.waitForFinished());
     QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
     const QImage crop(output + "/fit-1.png");
     QCOMPARE(crop, source.scaled(400, 200, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
-    process.setArguments({"--fill-panorama", "--destination", output,
+    process.setArguments({"--fill-panorama", "--destination", output, "--format", "png",
                           "--collision", "replace", "--filename-template", "{source}-{number}", sourcePath});
     process.start();
     QVERIFY(process.waitForFinished());

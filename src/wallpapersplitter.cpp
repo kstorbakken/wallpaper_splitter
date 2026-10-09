@@ -183,7 +183,8 @@ void WallpaperSplitter::exportWallpapers() {
             QFileDialog::ShowDirsOnly);
     if (directory.isEmpty()) return;
 
-    ExportOptions options{directory, preferences.fileNameTemplate, preferences.collisionPolicy};
+    ExportOptions options{directory, preferences.fileNameTemplate, preferences.collisionPolicy,
+                          preferences.outputFormat, preferences.jpegQuality};
     OperationResult result = OutputService::exportCrops(
             imageItem->image(), currentScreenCrops(), sourceName(), options);
     if (!result.success && result.error == OperationError::Collision
@@ -238,7 +239,7 @@ QStringList WallpaperSplitter::splitImage(const QImage &image, const QList<QRect
         crops.append({QStringLiteral("screen-%1").arg(index + 1), index + 1, {}, screens.at(index)});
     }
     const ExportOptions options{path, QStringLiteral("{source}-{number}-{digest}"),
-                                CollisionPolicy::Replace};
+                                CollisionPolicy::Replace, OutputFormat::Png};
     const OperationResult result = OutputService::exportCrops(image, crops, outputBaseName, options);
     if (!result.success) qWarning().noquote() << result.message;
     return result.paths;

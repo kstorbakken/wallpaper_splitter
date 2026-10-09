@@ -20,22 +20,82 @@
 #include <utility>
 
 namespace {
-OperationResult writeImage(const QImage &image, const QString &path) {
+bool hasVisibleTransparency(const QImage &image) {
+    if (!image.hasAlphaChannel()) return false;
+    const QImage argb = image.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < argb.height(); ++y) {
+        const auto *pixels = reinterpret_cast<const QRgb *>(argb.constScanLine(y));
+        for (int x = 0; x < argb.width(); ++x)
+            if (qAlpha(pixels[x]) != 255) return true;
+    }
+    return false;
+}
+
+OutputFormat automaticFormat(const QImage &image, const QString &sourceName = {}) {
+    if (hasVisibleTransparency(image)) return OutputFormat::Png;
+    // Preserve the lossless character of PNG inputs. Other opaque wallpaper
+    // formats are normally photographic and benefit substantially from JPEG.
+    return QFileInfo(sourceName).suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) == 0
+            ? OutputFormat::Png : OutputFormat::Jpeg;
+}
+
+OutputFormat encodedFormat(const QString &path) {
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg"))
+        return OutputFormat::Jpeg;
+    if (suffix == QStringLiteral("png")) return OutputFormat::Png;
+    return OutputFormat::Automatic;
+}
+
+QString extension(OutputFormat format) {
+    return format == OutputFormat::Jpeg ? QStringLiteral("jpg") : QStringLiteral("png");
+}
+
+OperationResult writeImage(const QImage &image, const QString &path,
+                           OutputFormat format, int jpegQuality) {
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         return OperationResult::failure(OperationError::FileSystem,
                                         QObject::tr("Could not open %1 for writing: %2")
                                                 .arg(path, file.errorString()));
     }
-    if (!image.save(&file, "PNG")) {
+    const char *encoder = format == OutputFormat::Jpeg ? "JPEG" : "PNG";
+    const int quality = format == OutputFormat::Jpeg ? qBound(1, jpegQuality, 100) : -1;
+    if (!image.save(&file, encoder, quality)) {
         file.cancelWriting();
         return OperationResult::failure(OperationError::FileSystem,
-                                        QObject::tr("Could not encode %1 as PNG.").arg(path));
+                                        QObject::tr("Could not encode %1 as %2.")
+                                                .arg(path, QString::fromLatin1(encoder)));
     }
     if (!file.commit()) {
         return OperationResult::failure(OperationError::FileSystem,
                                         QObject::tr("Could not finish writing %1: %2")
                                                 .arg(path, file.errorString()));
+    }
+    return OperationResult::ok({path});
+}
+
+OperationResult copyImage(const QString &sourcePath, const QString &path) {
+    QFile source(sourcePath);
+    QSaveFile destination(path);
+    if (!source.open(QIODevice::ReadOnly) || !destination.open(QIODevice::WriteOnly)) {
+        return OperationResult::failure(OperationError::FileSystem,
+                                        QObject::tr("Could not copy %1 to %2.")
+                                                .arg(sourcePath, path));
+    }
+    while (!source.atEnd()) {
+        const QByteArray block = source.read(1024 * 1024);
+        if (block.isEmpty() || destination.write(block) != block.size()) {
+            destination.cancelWriting();
+            return OperationResult::failure(OperationError::FileSystem,
+                                            QObject::tr("Could not copy %1 to %2.")
+                                                    .arg(sourcePath, path));
+        }
+    }
+    if (!destination.commit()) {
+        return OperationResult::failure(OperationError::FileSystem,
+                                        QObject::tr("Could not finish writing %1: %2")
+                                                .arg(path, destination.errorString()));
     }
     return OperationResult::ok({path});
 }
@@ -63,6 +123,7 @@ QString cropDigest(const QImage &image) {
 }
 
 OperationResult expandNames(const QList<CropArtifact> &artifacts,
+                            const QList<OutputFormat> &formats,
                             const QString &sourceName,
                             const QString &nameTemplate,
                             int revision,
@@ -121,7 +182,7 @@ OperationResult expandNames(const QList<CropArtifact> &artifacts,
             return OperationResult::failure(OperationError::Arguments,
                                             QObject::tr("The filename template produced an empty name."));
         }
-        name += QStringLiteral(".png");
+        name += QStringLiteral(".") + extension(formats.at(names->size()));
         if (uniqueNames.contains(name)) {
             return OperationResult::failure(
                     OperationError::Arguments,
@@ -147,8 +208,19 @@ OperationResult exportArtifacts(const QList<CropArtifact> &artifacts,
         return OperationResult::failure(OperationError::Arguments,
                                         QObject::tr("No export directory was selected."));
     }
+    QList<OutputFormat> formats;
+    for (const CropArtifact &artifact : artifacts) {
+        OutputFormat format = options.format;
+        if (format == OutputFormat::Automatic) {
+            format = encodedFormat(artifact.encodedPath);
+            if (format == OutputFormat::Automatic)
+                format = automaticFormat(artifact.image, sourceName);
+        }
+        formats.append(format);
+    }
     QStringList names;
-    OperationResult result = expandNames(artifacts, sourceName, options.fileNameTemplate, 0, &names);
+    OperationResult result = expandNames(artifacts, formats, sourceName,
+                                         options.fileNameTemplate, 0, &names);
     if (!result.success) return result;
     if (!QDir().mkpath(options.directory)) {
         return OperationResult::failure(OperationError::FileSystem,
@@ -164,7 +236,8 @@ OperationResult exportArtifacts(const QList<CropArtifact> &artifacts,
     if (collision && options.collisionPolicy == CollisionPolicy::Revision) {
         int revision = 2;
         do {
-            result = expandNames(artifacts, sourceName, options.fileNameTemplate, revision++, &names);
+            result = expandNames(artifacts, formats, sourceName,
+                                 options.fileNameTemplate, revision++, &names);
             if (!result.success) return result;
         } while (anyExists(options.directory, names));
     }
@@ -173,7 +246,12 @@ OperationResult exportArtifacts(const QList<CropArtifact> &artifacts,
     const QDir directory(options.directory);
     for (int index = 0; index < artifacts.size(); ++index) {
         const QString path = directory.filePath(names.at(index));
-        result = writeImage(artifacts.at(index).image, path);
+        const CropArtifact &artifact = artifacts.at(index);
+        const bool canCopy = options.format == OutputFormat::Automatic
+                && !artifact.encodedPath.isEmpty()
+                && encodedFormat(artifact.encodedPath) == formats.at(index);
+        result = canCopy ? copyImage(artifact.encodedPath, path)
+                         : writeImage(artifact.image, path, formats.at(index), options.jpegQuality);
         if (!result.success) return OperationResult::failure(result.error, result.message, paths);
         paths.append(path);
     }
@@ -298,7 +376,7 @@ OperationResult OutputService::createCrops(const QImage &image,
                                                     .arg(screen.number));
         }
         QImage crop = image.copy(screen.cropRect);
-        artifacts->append({screen, crop, cropDigest(crop)});
+        artifacts->append({screen, crop, cropDigest(crop), {}});
     }
     return OperationResult::ok();
 }
@@ -329,7 +407,7 @@ OperationResult OutputService::exportCrops(const QStringList &cropPaths,
                     OperationError::FileSystem,
                     QObject::tr("A generated image is missing, unreadable, or has changed dimensions."));
         }
-        artifacts.append({screens.at(index), crop, cropDigest(crop)});
+        artifacts.append({screens.at(index), crop, cropDigest(crop), cropPaths.at(index)});
     }
     return exportArtifacts(artifacts, sourceName, options);
 }
@@ -357,23 +435,43 @@ OperationResult OutputService::applyManaged(const QImage &image,
                                                 .arg(setDirectory));
     }
 
-    QStringList paths;
-    QStringList relativePaths;
-    for (const CropArtifact &artifact : artifacts) {
-        const QString relative = QStringLiteral("screen-%1-%2.png")
-                .arg(artifact.screen.number).arg(artifact.digest);
-        const QString path = QDir(setDirectory).filePath(relative);
-        result = writeImage(artifact.image, path);
-        if (!result.success) return OperationResult::failure(result.error, result.message, paths);
-        relativePaths.append(relative);
-        paths.append(path);
-    }
-
     const QString manifestPath = QDir(setDirectory).filePath(QStringLiteral("manifest.json"));
     QJsonObject previous;
     QFile previousFile(manifestPath);
     if (previousFile.open(QIODevice::ReadOnly))
         previous = QJsonDocument::fromJson(previousFile.readAll()).object();
+    const QJsonArray previousCrops = previous.value(QStringLiteral("crops")).toArray();
+
+    QStringList paths;
+    QStringList relativePaths;
+    for (int index = 0; index < artifacts.size(); ++index) {
+        const CropArtifact &artifact = artifacts.at(index);
+        OutputFormat format = automaticFormat(artifact.image, sourceName);
+        QString relative;
+        if (index < previousCrops.size()) {
+            const QString candidate = previousCrops.at(index).toObject()
+                                              .value(QStringLiteral("path")).toString();
+            const QString candidatePath = QDir(setDirectory).filePath(candidate);
+            const QString expectedPrefix = QStringLiteral("screen-%1-%2.")
+                    .arg(artifact.screen.number).arg(artifact.digest);
+            if (candidate.startsWith(expectedPrefix)
+                && !candidate.contains('/') && !candidate.contains('\\')
+                && QFileInfo::exists(candidatePath)
+                && !QFileInfo(candidatePath).isSymLink()
+                && encodedFormat(candidatePath) != OutputFormat::Automatic) {
+                relative = candidate;
+                format = encodedFormat(candidatePath);
+            }
+        }
+        if (relative.isEmpty()) relative = QStringLiteral("screen-%1-%2.%3")
+                .arg(artifact.screen.number).arg(artifact.digest, extension(format));
+        const QString path = QDir(setDirectory).filePath(relative);
+        result = writeImage(artifact.image, path, format, 90);
+        if (!result.success) return OperationResult::failure(result.error, result.message, paths);
+        relativePaths.append(relative);
+        paths.append(path);
+    }
+
     const QString createdAt = previous.value("createdAt").toString(
             QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     auto manifest = managedManifest(setId, createdAt, QStringLiteral("prepared"), {},
@@ -412,11 +510,13 @@ QString OutputService::sanitizeFileComponent(const QString &value) {
 OperationResult OutputService::validateFileNameTemplate(const QString &fileNameTemplate) {
     QList<CropArtifact> artifacts{
             {{QStringLiteral("DP-1"), 1, QRect(0, 0, 1, 1), QRect(0, 0, 1, 1)},
-             QImage(1, 1, QImage::Format_RGB32), QStringLiteral("0123456789abcdef")},
+             QImage(1, 1, QImage::Format_RGB32), QStringLiteral("0123456789abcdef"), {}},
             {{QStringLiteral("HDMI-1"), 2, QRect(1, 0, 1, 1), QRect(1, 0, 1, 1)},
-             QImage(1, 1, QImage::Format_RGB32), QStringLiteral("fedcba9876543210")}};
+             QImage(1, 1, QImage::Format_RGB32), QStringLiteral("fedcba9876543210"), {}}};
+    const QList<OutputFormat> formats(artifacts.size(), OutputFormat::Jpeg);
     QStringList names;
-    return expandNames(artifacts, QStringLiteral("wallpaper.jpg"), fileNameTemplate, 0, &names);
+    return expandNames(artifacts, formats, QStringLiteral("wallpaper.jpg"),
+                       fileNameTemplate, 0, &names);
 }
 
 QString OutputService::collisionPolicyName(CollisionPolicy policy) {
@@ -436,6 +536,27 @@ bool OutputService::parseCollisionPolicy(const QString &value, CollisionPolicy *
     else if (normalized == QStringLiteral("fail")) *policy = CollisionPolicy::Fail;
     else if (normalized == QStringLiteral("replace")) *policy = CollisionPolicy::Replace;
     else if (normalized == QStringLiteral("revision")) *policy = CollisionPolicy::Revision;
+    else return false;
+    return true;
+}
+
+QString OutputService::outputFormatName(OutputFormat format) {
+    switch (format) {
+        case OutputFormat::Automatic: return QStringLiteral("automatic");
+        case OutputFormat::Jpeg: return QStringLiteral("jpeg");
+        case OutputFormat::Png: return QStringLiteral("png");
+    }
+    return QStringLiteral("automatic");
+}
+
+bool OutputService::parseOutputFormat(const QString &value, OutputFormat *format) {
+    if (format == nullptr) return false;
+    const QString normalized = value.toLower();
+    if (normalized == QStringLiteral("automatic") || normalized == QStringLiteral("auto"))
+        *format = OutputFormat::Automatic;
+    else if (normalized == QStringLiteral("jpeg") || normalized == QStringLiteral("jpg"))
+        *format = OutputFormat::Jpeg;
+    else if (normalized == QStringLiteral("png")) *format = OutputFormat::Png;
     else return false;
     return true;
 }

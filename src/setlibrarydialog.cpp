@@ -86,7 +86,8 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
             this, tr("Export wallpaper crops"), preferences.exportDirectory,
             QFileDialog::ShowDirsOnly);
         if (directory.isEmpty()) return;
-        ExportOptions options{directory, preferences.fileNameTemplate, preferences.collisionPolicy};
+        ExportOptions options{directory, preferences.fileNameTemplate, preferences.collisionPolicy,
+                              preferences.outputFormat, preferences.jpegQuality};
         auto result = library.exportSet(ids.first(), options);
         if (!result.success && result.error == OperationError::Collision
             && options.collisionPolicy == CollisionPolicy::Ask) {

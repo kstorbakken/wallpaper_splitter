@@ -8,6 +8,7 @@
 class QComboBox;
 class QCheckBox;
 class QLineEdit;
+class QSpinBox;
 
 class SettingsDialog final : public QDialog {
     Q_OBJECT
@@ -26,6 +27,8 @@ private:
     QLineEdit *exportDirectory{};
     QLineEdit *fileNameTemplate{};
     QComboBox *collisionPolicy{};
+    QComboBox *outputFormat{};
+    QSpinBox *jpegQuality{};
 };
 
 #endif
