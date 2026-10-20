@@ -56,6 +56,17 @@
     </screenshots>
     
     <releases>
+        <release version="1.4.1" date="2026-10-20">
+            <url type="details">https://github.com/kstorbakken/wallpaper_splitter/releases/tag/v1.4.1</url>
+            <description>
+                <p>Fixed:</p>
+                <ul>
+                    <li>Apply wallpapers correctly on Plasma 6.8 when inactive desktops retain screen IDs, while preserving support for earlier Plasma 6 releases.</li>
+                    <li>Report active screen counts, desktop matches, and distinct crop matches when Plasma cannot apply a wallpaper set.</li>
+                </ul>
+            </description>
+        </release>
+
         <release version="1.4.0" date="2026-10-09">
             <url type="details">https://github.com/kstorbakken/wallpaper_splitter/releases/tag/v1.4.0</url>
             <description>

@@ -194,7 +194,8 @@ for more on that see their documentation provided [here](https://develop.kde.org
 ## 🛠️ Build and test
 
 Wallpaper Splitter requires a C++20 compiler, CMake 3.20 or newer, Qt 6, and
-KDE Frameworks 6 ConfigWidgets.
+KDE Frameworks 6 ConfigWidgets. Building the tests also requires Qt 6 Qml
+(`qt6-declarative` on Arch, `qt6-declarative-dev` on Debian).
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON

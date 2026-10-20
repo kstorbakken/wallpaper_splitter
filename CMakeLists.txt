@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(wallpaper_splitter VERSION 1.4.0 LANGUAGES CXX)
+project(wallpaper_splitter VERSION 1.4.1 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -95,7 +95,7 @@ include(CPack)
 
 include(CTest)
 if(BUILD_TESTING)
-    find_package(Qt6 REQUIRED COMPONENTS Test)
+    find_package(Qt6 REQUIRED COMPONENTS Test Qml)
 
     qt_add_executable(splitimage_test
             tests/splitimage_test.cpp
@@ -119,6 +119,7 @@ if(BUILD_TESTING)
             Qt6::DBus
             Qt6::Gui
             Qt6::Test
+            Qt6::Qml
             Qt6::Widgets
             KF6::ConfigWidgets
             KF6::ConfigCore)

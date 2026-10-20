@@ -20,6 +20,7 @@ RUN pacman --sync --refresh --sysupgrade --noconfirm \
         pkgconf \
         procps-ng \
         qt6-base \
+        qt6-declarative \
         sudo \
         which \
     && pacman --sync --clean --clean --noconfirm \

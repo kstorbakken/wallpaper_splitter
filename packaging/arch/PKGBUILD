@@ -1,5 +1,5 @@
 pkgname=wallpaper_splitter
-pkgver=1.4.0
+pkgver=1.4.1
 pkgrel=1
 pkgdesc='Split and span a single wallpaper across multiple screens on KDE Plasma'
 arch=('x86_64')
@@ -7,6 +7,7 @@ url='https://github.com/kstorbakken/wallpaper_splitter'
 license=('GPL-3.0-only')
 depends=('gcc-libs' 'glibc' 'hicolor-icon-theme' 'kconfigwidgets' 'qt6-base')
 makedepends=('cmake' 'extra-cmake-modules' 'ninja')
+checkdepends=('qt6-declarative')
 options=('!debug')
 
 _project_root="$(realpath "${startdir}/../..")"

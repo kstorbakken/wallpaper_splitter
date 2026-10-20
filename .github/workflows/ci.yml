@@ -27,7 +27,8 @@ jobs:
             extra-cmake-modules \
             git \
             libkf6configwidgets-dev \
-            qt6-base-dev
+            qt6-base-dev \
+            qt6-declarative-dev
 
       - name: Check out repository
         uses: actions/checkout@v4

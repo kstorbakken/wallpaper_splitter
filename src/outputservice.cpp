@@ -575,6 +575,7 @@ QString DBusPlasmaApplicator::buildScript(const QList<ScreenCrop> &screens,
     const QString cropArray = QString::fromUtf8(QJsonDocument(crops).toJson(QJsonDocument::Compact));
     return QStringLiteral(R"(
 const crops = %1;
+const activeScreens = screenCount;
 let applied = 0;
 let unmatchedDesktops = 0;
 function sameGeometry(crop, geometry) {
@@ -583,7 +584,9 @@ function sameGeometry(crop, geometry) {
 }
 const targets = [];
 for (const desktop of desktopsForActivity(currentActivity())) {
-    if (desktop.screen < 0) continue;
+    // Plasma 6.8 retains screen IDs for inactive desktops. Querying their
+    // geometry falls back to the primary screen, creating a false crop match.
+    if (desktop.screen < 0 || desktop.screen >= activeScreens) continue;
     const geometry = screenGeometry(desktop.screen);
     const crop = crops.find(candidate => sameGeometry(candidate, geometry));
     if (crop === undefined) {
@@ -593,8 +596,10 @@ for (const desktop of desktopsForActivity(currentActivity())) {
     targets.push({desktop, crop});
 }
 // Validate the entire activity before changing any desktop.
-if (unmatchedDesktops === 0 && targets.length === crops.length
-    && new Set(targets.map(target => target.crop)).size === crops.length) {
+const matchedDesktops = targets.length;
+const uniqueCrops = new Set(targets.map(target => target.crop)).size;
+if (activeScreens === crops.length && unmatchedDesktops === 0
+    && matchedDesktops === crops.length && uniqueCrops === crops.length) {
   for (const {desktop, crop} of targets) {
     desktop.wallpaperPlugin = 'org.kde.image';
     desktop.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
@@ -603,7 +608,7 @@ if (unmatchedDesktops === 0 && targets.length === crops.length
   }
 }
 print('WALLPAPER_SPLITTER_RESULT ' + JSON.stringify({applied, expected: crops.length,
-                                                     unmatchedDesktops}));
+    activeScreens, matchedDesktops, uniqueCrops, unmatchedDesktops}));
 )").arg(cropArray);
 }
 
@@ -640,8 +645,14 @@ OperationResult DBusPlasmaApplicator::apply(const QList<ScreenCrop> &screens,
     if (applied != expected || unmatched != 0) {
         return OperationResult::failure(
                 OperationError::Plasma,
-                QObject::tr("Plasma applied %1 of %2 crops; %3 desktop(s) had no matching geometry.")
-                        .arg(applied).arg(expected).arg(unmatched));
+                QObject::tr("Plasma applied %1 of %2 crops. Found %3 active screen(s), "
+                            "%4 matching desktop(s), %5 distinct crop match(es), "
+                            "and %6 desktop(s) with unmatched geometry.")
+                        .arg(applied).arg(expected)
+                        .arg(summary.value(QStringLiteral("activeScreens")).toInt(-1))
+                        .arg(summary.value(QStringLiteral("matchedDesktops")).toInt(-1))
+                        .arg(summary.value(QStringLiteral("uniqueCrops")).toInt(-1))
+                        .arg(unmatched));
     }
     return OperationResult::ok(paths);
 }
