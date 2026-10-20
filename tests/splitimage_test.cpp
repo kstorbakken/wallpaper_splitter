@@ -17,6 +17,8 @@
 #include <QJsonArray>
 #include <QListWidget>
 #include <QJsonObject>
+#include <QJSEngine>
+#include <algorithm>
 #include <QSettings>
 #include <QScrollBar>
 #include <QTemporaryDir>
@@ -86,6 +88,8 @@ private slots:
     void writesManagedManifestAndRetainsFailures();
     void reusesIdenticalManagedSet();
     void plasmaScriptUsesDesktopGeometry();
+    void plasmaScriptValidatesActiveDesktops_data();
+    void plasmaScriptValidatesActiveDesktops();
     void commandLineExportsAndRejectsConflicts();
     void libraryReappliesAndPreservesMetadata();
     void libraryRejectsUnsafeDeletion();
@@ -723,6 +727,123 @@ void SplitImageTest::plasmaScriptUsesDesktopGeometry() {
     QVERIFY(script.contains(QStringLiteral("sameGeometry")));
     QVERIFY(script.contains(QStringLiteral("/tmp/right.png")));
     QVERIFY(script.contains(QStringLiteral("WALLPAPER_SPLITTER_RESULT")));
+}
+
+void SplitImageTest::plasmaScriptValidatesActiveDesktops_data() {
+    QTest::addColumn<QList<int>>("desktopScreens");
+    QTest::addColumn<int>("activeScreens");
+    QTest::addColumn<bool>("geometryMismatch");
+    QTest::addColumn<int>("expectedApplied");
+
+    QTest::newRow("active-desktops") << QList<int>{1, 0, 2} << 3 << false << 3;
+    QTest::newRow("plasma-6.8-disabled-fourth-output")
+            << QList<int>{1, 3, 0, 2} << 3 << false << 3;
+    QTest::newRow("legacy-inactive-desktop") << QList<int>{1, -1, 0, 2} << 3 << false << 3;
+    QTest::newRow("missing-desktop") << QList<int>{1, 0} << 3 << false << 0;
+    QTest::newRow("no-desktops") << QList<int>{} << 3 << false << 0;
+    QTest::newRow("duplicate-active-desktop") << QList<int>{1, 0, 0, 2} << 3 << false << 0;
+    QTest::newRow("unmatched-geometry") << QList<int>{1, 0, 2} << 3 << true << 0;
+    QTest::newRow("new-output-without-crop-or-desktop")
+            << QList<int>{1, 0, 2} << 4 << false << 0;
+}
+
+void SplitImageTest::plasmaScriptValidatesActiveDesktops() {
+    QFETCH(QList<int>, desktopScreens);
+    QFETCH(int, activeScreens);
+    QFETCH(bool, geometryMismatch);
+    QFETCH(int, expectedApplied);
+
+    // The user's Plasma IDs/geometry, deliberately in a different order
+    // from both the crop list and desktop enumeration.
+    const QList<ScreenCrop> screens{
+        {"DP-3", 1, QRect(3840, 0, 1920, 1080), {}},
+        {"HDMI-A-1", 2, QRect(0, 0, 1920, 1080), {}},
+        {"DP-1", 3, QRect(1920, 0, 1920, 1080), {}}};
+    const QStringList paths{"/tmp/right.png", "/tmp/left.png", "/tmp/middle.png"};
+    const QList<int> desktopIds{189, 298, 352, 353};
+    QJsonArray desktops;
+    for (int i = 0; i < desktopScreens.size(); ++i)
+        desktops.append(QJsonObject{{"id", desktopIds[i]}, {"screen", desktopScreens[i]}});
+
+    QJSEngine engine;
+    engine.globalObject().setProperty("screenCount", activeScreens);
+    engine.globalObject().setProperty("geometryMismatch", geometryMismatch);
+    const auto setup = engine.evaluate(QStringLiteral(R"(
+var writes = [];
+var geometryQueries = [];
+var output = "";
+var desktopList = %1;
+for (var desktop of desktopList) {
+    desktop.wallpaperPlugin = "original.plugin";
+    desktop.currentConfigGroup = ["Original"];
+    desktop.writeConfig = function(key, value) {
+        writes.push({id: this.id, key: key, path: value,
+                     plugin: this.wallpaperPlugin, group: this.currentConfigGroup});
+    };
+}
+function currentActivity() { return "current"; }
+function desktopsForActivity(activity) {
+    if (activity !== "current") throw new Error("Wrong activity");
+    return desktopList;
+}
+function screenGeometry(screen) {
+    geometryQueries.push(screen);
+    // Reproduce Plasma's fallback to primary geometry for an absent screen.
+    var x = screen === 1 ? 0 : screen === 2 ? 3840 : 1920;
+    return {x: x, y: geometryMismatch && screen === 2 ? 100 : 0,
+            width: 1920, height: 1080};
+}
+function print(message) { output += message; }
+)").arg(QString::fromUtf8(QJsonDocument(desktops).toJson(QJsonDocument::Compact))));
+    QVERIFY2(!setup.isError(), qPrintable(setup.toString()));
+
+    const auto result = engine.evaluate(DBusPlasmaApplicator::buildScript(screens, paths));
+    QVERIFY2(!result.isError(), qPrintable(result.toString()));
+    const auto writes = engine.globalObject().property("writes");
+    QCOMPARE(writes.property("length").toInt(), expectedApplied);
+    const QString output = engine.globalObject().property("output").toString();
+    QVERIFY(output.startsWith("WALLPAPER_SPLITTER_RESULT "));
+    const auto summary = QJsonDocument::fromJson(output.mid(output.indexOf('{')).toUtf8()).object();
+    QCOMPARE(summary.value("applied").toInt(-1), expectedApplied);
+    QCOMPARE(summary.value("expected").toInt(-1), 3);
+    QCOMPARE(summary.value("activeScreens").toInt(-1), activeScreens);
+    const int validDesktops = std::count_if(desktopScreens.cbegin(), desktopScreens.cend(),
+        [activeScreens](int screen) { return screen >= 0 && screen < activeScreens; });
+    QCOMPARE(summary.value("matchedDesktops").toInt(-1), validDesktops - int(geometryMismatch));
+    QCOMPARE(summary.value("unmatchedDesktops").toInt(-1), int(geometryMismatch));
+    const int expectedUnique = desktopScreens.isEmpty() ? 0
+            : (geometryMismatch || desktopScreens.size() == 2) ? 2 : 3;
+    QCOMPARE(summary.value("uniqueCrops").toInt(-1), expectedUnique);
+
+    const auto queries = engine.globalObject().property("geometryQueries");
+    QCOMPARE(queries.property("length").toInt(), validDesktops);
+    for (int i = 0; i < queries.property("length").toInt(); ++i) {
+        const int screen = queries.property(i).toInt();
+        QVERIFY(screen >= 0 && screen < activeScreens);
+    }
+
+    const auto actualDesktops = engine.globalObject().property("desktopList");
+    int writeIndex = 0;
+    for (int i = 0; i < desktopScreens.size(); ++i) {
+        const bool shouldApply = expectedApplied > 0
+                && desktopScreens[i] >= 0 && desktopScreens[i] < activeScreens;
+        const auto desktop = actualDesktops.property(i);
+        QCOMPARE(desktop.property("wallpaperPlugin").toString(),
+                 shouldApply ? QStringLiteral("org.kde.image") : QStringLiteral("original.plugin"));
+        if (!shouldApply) {
+            QCOMPARE(desktop.property("currentConfigGroup").toVariant().toStringList(),
+                     QStringList{"Original"});
+            continue;
+        }
+        const auto write = writes.property(writeIndex++);
+        QCOMPARE(write.property("id").toInt(), desktopIds[i]);
+        QCOMPARE(write.property("key").toString(), QStringLiteral("Image"));
+        const QString expectedPath = desktopScreens[i] == 0 ? "/tmp/middle.png"
+                : desktopScreens[i] == 1 ? "/tmp/left.png" : "/tmp/right.png";
+        QCOMPARE(write.property("path").toString(), expectedPath);
+        QCOMPARE(write.property("group").toVariant().toStringList(),
+                 (QStringList{"Wallpaper", "org.kde.image", "General"}));
+    }
 }
 
 void SplitImageTest::commandLineExportsAndRejectsConflicts() {

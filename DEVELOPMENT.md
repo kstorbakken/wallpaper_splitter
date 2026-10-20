@@ -5,6 +5,10 @@ compiler, CMake 3.20 or newer, Qt 6, and KDE Frameworks 6 ConfigWidgets. The
 committed devcontainer is a reproducible convenience environment, not a
 requirement for contributing.
 
+Tests also require Qt 6 Qml (`qt6-declarative` on Arch or
+`qt6-declarative-dev` on Debian) to execute the Plasma wallpaper script in
+QJSEngine with simulated desktops. The application itself does not require Qml.
+
 ## Arch Linux devcontainer
 
 The included `.devcontainer/` definition uses `archlinux:base-devel` with the
@@ -43,7 +47,7 @@ written to the ignored `packages/` directory:
 On an Arch Linux host, install or upgrade the printed artifact with:
 
 ```sh
-sudo pacman -U packages/wallpaper_splitter-1.4.0-1-x86_64.pkg.tar.zst
+sudo pacman -U packages/wallpaper_splitter-1.4.1-1-x86_64.pkg.tar.zst
 ```
 
 This local test-package workflow is separate from the packages created for
@@ -62,7 +66,7 @@ entry in `devcontainer.json`, and install that distribution's equivalents of:
 
 - a C++20 compiler and standard build tools;
 - CMake and Ninja;
-- Qt 6 Core, D-Bus, GUI, Widgets, and Test development files;
+- Qt 6 Core, D-Bus, GUI, Widgets, Test, and Qml development files;
 - KDE Frameworks 6 ConfigWidgets and Extra CMake Modules.
 
 Keep the CMake build and test commands the same. Package creation is
