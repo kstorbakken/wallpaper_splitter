@@ -56,6 +56,33 @@
     </screenshots>
     
     <releases>
+        <release version="1.5.0" date="2026-10-29">
+            <url type="details">https://github.com/kstorbakken/wallpaper_splitter/releases/tag/v1.5.0</url>
+            <description>
+                <p>Added:</p>
+                <ul>
+                    <li>Rotate saved wallpaper sets in playlist order or shuffle mode, with manual advancement and automatic scheduling while the app is closed.</li>
+                    <li>Split a folder of images into exports or saved library sets, with remembered batch settings and a cancelable progress dialog.</li>
+                    <li>Choose a custom library folder for managed sets.</li>
+                    <li>Temporarily preview a wallpaper on the desktop and restore the previous wallpaper after a configurable countdown.</li>
+                </ul>
+                <p>Changed:</p>
+                <ul>
+                    <li>Build and test Debian, Fedora, Arch Linux, and KDE neon targets with shared validation before release packaging.</li>
+                    <li>Include explicit Wayland and additional image-format dependencies in native packages and verify Wayland startup for the AppImage.</li>
+                    <li>Reduce repeated source compilation and avoid unnecessary monitor calculations and PNG alpha scans.</li>
+                    <li>Make the README easier to scan, with focused user guides and an updated editor screenshot.</li>
+                </ul>
+                <p>Fixed:</p>
+                <ul>
+                    <li>Remove deleted library sets from saved slideshow playlists and stop automatic rotation when the playlist becomes empty.</li>
+                    <li>Hide stale slideshow entries left by earlier versions and discard their saved references when the playlist is saved.</li>
+                    <li>Keep the preview countdown dialog large enough to display its wrapped text.</li>
+                    <li>Account for indexed-image palettes and normalize low-depth image storage when computing crop digests.</li>
+                </ul>
+            </description>
+        </release>
+
         <release version="1.4.1" date="2026-10-20">
             <url type="details">https://github.com/kstorbakken/wallpaper_splitter/releases/tag/v1.4.1</url>
             <description>
