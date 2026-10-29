@@ -173,7 +173,10 @@ void SlideshowDialog::reject() {
 void SlideshowDialog::updateStatus() {
     SlideshowSettings settings;
     const auto result = slideshow.load(&settings);
-    nextButton->setEnabled(result.success && !dirty && !settings.setIds.isEmpty());
+    bool selected = false;
+    for (int i = 0; i < list->count(); ++i)
+        selected |= list->item(i)->checkState() == Qt::Checked;
+    nextButton->setEnabled(result.success && !dirty && selected && !settings.setIds.isEmpty());
     if (!result.success) { status->setText(result.message); return; }
     QString text;
     if (settings.enabled) {

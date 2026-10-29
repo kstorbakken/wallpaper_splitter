@@ -705,6 +705,7 @@ void SlideshowTest::dialogCanSaveEmptyPlaylistAfterAllSetsWereDeleted() {
     QVERIFY(SetLibrary(f.root).remove(id, f.plasma).success);
     SlideshowDialog dialog(nullptr, f.root, f.config, &f.scheduler);
     QCOMPARE(dialog.findChild<QListWidget *>("slideshowSets")->count(), 0);
+    QVERIFY(!dialog.findChild<QPushButton *>("slideshowNext")->isEnabled());
     dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
     QVERIFY(f.settings().setIds.isEmpty());
     QVERIFY(!f.settings().enabled);
