@@ -201,8 +201,10 @@ Each switch reapplies a complete set to whichever **Plasma activity is active at
 that moment**. Other activities keep their wallpapers. Saved monitor positions and
 resolutions must match the connected layout. Missing, damaged, deleted, and
 incompatible sets are skipped; if none are usable, the wallpaper stays unchanged.
-Deleting a set does not delete its playlist entry: uncheck the missing entry and
-save to remove it. Original source images are not needed.
+Deleting sets through the Library also removes their playlist entries. Removing
+the last selected set turns automatic rotation off. The chooser shows only sets
+in the current library; click **Save** to discard stale entries retained by earlier
+versions. Original source images are not needed.
 
 Automatic rotation requires a **systemd user session integrated with the graphical
 desktop**. The app installs a user timer and a short-lived service, without root

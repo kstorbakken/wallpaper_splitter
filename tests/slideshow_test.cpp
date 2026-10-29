@@ -89,6 +89,8 @@ class SlideshowTest : public QObject {
     Q_OBJECT
 private slots:
     void orderedPlaybackSurvivesRestartAndEdits();
+    void removesDeletedSetsWithoutResettingRemainingPlaylist();
+    void removingLastSetDisablesRotationWhenSchedulerFails();
     void shuffleAvoidsImmediateRepeats();
     void skipsUnusableSetsAndKeepsWallpaperWhenNoneMatch();
     void failureDoesNotAdvanceOrApplyAnotherSet();
@@ -106,6 +108,8 @@ private slots:
     void schedulerReportsFailureAndUsesAppImagePath();
     void schedulerStatusReportsLaunchFailures();
     void dialogSavesPlaylistOrderAndSettings();
+    void dialogOmitsDeletedSetsAndSavesCleanPlaylist();
+    void dialogCanSaveEmptyPlaylistAfterAllSetsWereDeleted();
     void dialogKeepsManualPlaybackAvailableAfterSchedulerFailure();
     void commandLineRejectsConflictsAndHonorsDisabledState();
 };
@@ -138,6 +142,54 @@ void SlideshowTest::orderedPlaybackSurvivesRestartAndEdits() {
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
     QVERIFY(restarted.next(f.layout, f.plasma, true).success);
     QCOMPARE(f.settings().lastSetId, c);
+}
+
+void SlideshowTest::removesDeletedSetsWithoutResettingRemainingPlaylist() {
+    Fixture f;
+    QVERIFY(f.slideshow.removeSets({"set-00000000000000000000000000000000"}, f.scheduler).success);
+    QVERIFY(!QFileInfo::exists(f.config));
+    const auto a = f.addSet(Qt::red), b = f.addSet(Qt::green), c = f.addSet(Qt::blue);
+    SlideshowSettings settings;
+    settings.setIds = {a, b, c};
+    settings.enabled = true;
+    settings.intervalMinutes = 17;
+    QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
+    QVERIFY(f.slideshow.next(f.layout, f.plasma).success);
+    settings = f.settings();
+    settings.shuffle = true;
+    QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
+    QVERIFY(f.slideshow.removeSets({b, "set-00000000000000000000000000000000"}, f.scheduler).success);
+    const auto remaining = f.settings();
+    QCOMPARE(remaining.setIds, (QStringList{a, c}));
+    QCOMPARE(remaining.lastSetId, a);
+    QCOMPARE(remaining.lastAttempt, settings.lastAttempt);
+    QCOMPARE(remaining.intervalMinutes, 17);
+    QVERIFY(remaining.shuffle);
+    QVERIFY(remaining.enabled);
+    QVERIFY(f.scheduler.active);
+    QCOMPARE(f.scheduler.disableCalls, 0);
+    QVERIFY(f.slideshow.removeSets({a, c}, f.scheduler).success);
+    QVERIFY(f.settings().setIds.isEmpty());
+    QVERIFY(f.settings().lastSetId.isEmpty());
+    QVERIFY(!f.settings().enabled);
+    QVERIFY(!f.scheduler.active);
+    QCOMPARE(f.scheduler.disableCalls, 1);
+}
+
+void SlideshowTest::removingLastSetDisablesRotationWhenSchedulerFails() {
+    Fixture f;
+    const auto id = f.addSet(Qt::blue);
+    SlideshowSettings settings;
+    settings.enabled = true;
+    settings.setIds = {id};
+    QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
+    f.scheduler.failDisable = true;
+    QVERIFY(!f.slideshow.removeSets({id}, f.scheduler).success);
+    QVERIFY(f.settings().setIds.isEmpty());
+    QVERIFY(!f.settings().enabled);
+    f.plasma.calls = 0;
+    QVERIFY(f.slideshow.next(f.layout, f.plasma, true).success);
+    QCOMPARE(f.plasma.calls, 0);
 }
 
 void SlideshowTest::shuffleAvoidsImmediateRepeats() {
@@ -307,8 +359,10 @@ void SlideshowTest::concurrentOperationsCannotRace() {
     f.plasma.calls = 0;
     QVERIFY(!f.slideshow.next(f.layout, f.plasma).success);
     QVERIFY(!f.slideshow.configure(settings, f.scheduler).success);
+    QVERIFY(!f.slideshow.removeSets({id}, f.scheduler).success);
     QCOMPARE(f.plasma.calls, 0);
     stateLock.unlock();
+    QCOMPARE(f.settings().setIds, QStringList{id});
     QLockFile libraryLock(QDir(f.root).filePath(".operation.lock"));
     QVERIFY(libraryLock.tryLock());
     const auto result = f.slideshow.next(f.layout, f.plasma);
@@ -348,6 +402,7 @@ void SlideshowTest::validatesSettingsWithoutClobberingSavedPlaylist() {
     QVERIFY(!f.slideshow.next(f.layout, f.plasma, true).success);
     QVERIFY(!f.slideshow.configure(settings, f.scheduler).success);
     QCOMPARE(f.plasma.calls, 0);
+    QVERIFY(!f.slideshow.removeSets(settings.setIds, f.scheduler).success);
     QVERIFY(file.open(QIODevice::ReadOnly));
     QCOMPARE(file.readAll(), "{\"schemaVersion\":99}");
 }
@@ -613,6 +668,49 @@ void SlideshowTest::dialogSavesPlaylistOrderAndSettings() {
     QVERIFY(dialog.findChild<QLabel *>("slideshowStatus")->text().contains("rotation is on"));
     SlideshowDialog reopened(nullptr, f.root, f.config, &f.scheduler);
     QCOMPARE(reopened.findChild<QListWidget *>("slideshowSets")->item(0)->data(Qt::UserRole).toString(), b);
+}
+
+void SlideshowTest::dialogOmitsDeletedSetsAndSavesCleanPlaylist() {
+    Fixture f;
+    const auto a = f.addSet(Qt::red), b = f.addSet(Qt::blue), deleted = f.addSet(Qt::green);
+    SlideshowSettings settings;
+    settings.setIds = {b, deleted, a};
+    settings.enabled = true;
+    QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
+    QVERIFY(SetLibrary(f.root).remove(deleted, f.plasma).success);
+    const auto added = f.addSet(Qt::yellow);
+    SlideshowDialog dialog(nullptr, f.root, f.config, &f.scheduler);
+    auto *list = dialog.findChild<QListWidget *>("slideshowSets");
+    QCOMPARE(list->count(), 3);
+    QCOMPARE(list->item(0)->data(Qt::UserRole).toString(), b);
+    QCOMPARE(list->item(1)->data(Qt::UserRole).toString(), a);
+    QCOMPARE(list->item(2)->data(Qt::UserRole).toString(), added);
+    QCOMPARE(list->item(0)->checkState(), Qt::Checked);
+    QCOMPARE(list->item(1)->checkState(), Qt::Checked);
+    QCOMPARE(list->item(2)->checkState(), Qt::Unchecked);
+    dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+    QCOMPARE(f.settings().setIds, (QStringList{b, a}));
+    QVERIFY(f.settings().enabled);
+    SlideshowDialog reopened(nullptr, f.root, f.config, &f.scheduler);
+    QCOMPARE(reopened.findChild<QListWidget *>("slideshowSets")->count(), 3);
+}
+
+void SlideshowTest::dialogCanSaveEmptyPlaylistAfterAllSetsWereDeleted() {
+    Fixture f;
+    const auto id = f.addSet(Qt::blue);
+    SlideshowSettings settings;
+    settings.setIds = {id};
+    settings.enabled = true;
+    QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
+    QVERIFY(SetLibrary(f.root).remove(id, f.plasma).success);
+    SlideshowDialog dialog(nullptr, f.root, f.config, &f.scheduler);
+    QCOMPARE(dialog.findChild<QListWidget *>("slideshowSets")->count(), 0);
+    dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+    QVERIFY(f.settings().setIds.isEmpty());
+    QVERIFY(!f.settings().enabled);
+    QVERIFY(!f.scheduler.active);
+    QVERIFY(!dialog.findChild<QCheckBox *>("slideshowEnabled")->isChecked());
+    QVERIFY(!dialog.findChild<QPushButton *>("slideshowNext")->isEnabled());
 }
 
 void SlideshowTest::commandLineRejectsConflictsAndHonorsDisabledState() {

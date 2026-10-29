@@ -47,6 +47,7 @@ public:
     // Saves the playlist and updates its timer together. A scheduling failure
     // leaves automatic rotation disabled, with the playlist available for retry.
     OperationResult configure(const SlideshowSettings &settings, SlideshowScheduler &scheduler) const;
+    OperationResult removeSets(const QStringList &setIds, SlideshowScheduler &scheduler) const;
     OperationResult next(const QList<QRect> &layout, PlasmaApplicator &applicator,
                          bool automatic = false) const;
 private:

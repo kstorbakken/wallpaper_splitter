@@ -76,16 +76,14 @@ SlideshowDialog::SlideshowDialog(QWidget *parent, const QString &managedRoot,
     for (const auto &set : sets) if (!order.contains(set.id)) order.append(set.id);
     for (const auto &id : order) {
         const auto found = std::find_if(sets.cbegin(), sets.cend(), [&id](const auto &set) { return set.id == id; });
-        const bool missing = found == sets.cend();
-        auto *item = new QListWidgetItem(missing ? tr("Missing set: %1").arg(id) : found->name, list);
+        if (found == sets.cend()) continue;
+        auto *item = new QListWidgetItem(found->name, list);
         item->setData(Qt::UserRole, id);
         item->setFlags((item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled)
                        & ~Qt::ItemIsDropEnabled);
         item->setCheckState(settings.setIds.contains(id) ? Qt::Checked : Qt::Unchecked);
-        if (!missing) {
-            item->setIcon(QPixmap::fromImage(SetLibrary::preview(*found, QSize(90, 50))));
-            item->setToolTip(found->problem);
-        }
+        item->setIcon(QPixmap::fromImage(SetLibrary::preview(*found, QSize(90, 50))));
+        item->setToolTip(found->problem);
     }
     interval->setValue(settings.intervalMinutes);
     enabled->setChecked(settings.enabled);
@@ -134,12 +132,12 @@ SlideshowDialog::SlideshowDialog(QWidget *parent, const QString &managedRoot,
 
 bool SlideshowDialog::save() {
     SlideshowSettings settings;
-    settings.enabled = enabled->isChecked();
     settings.intervalMinutes = interval->value();
     settings.shuffle = shuffle->isChecked();
     for (int i = 0; i < list->count(); ++i)
         if (list->item(i)->checkState() == Qt::Checked)
             settings.setIds.append(list->item(i)->data(Qt::UserRole).toString());
+    settings.enabled = enabled->isChecked() && !settings.setIds.isEmpty();
     const auto result = slideshow.configure(settings, *scheduler);
     if (!result.success) {
         // Scheduler failures can happen after the playlist has been saved.
@@ -155,6 +153,8 @@ bool SlideshowDialog::save() {
         updateStatus();
         return false;
     }
+    const QSignalBlocker blocker(enabled);
+    enabled->setChecked(settings.enabled);
     dirty = false;
     updateStatus();
     return true;
