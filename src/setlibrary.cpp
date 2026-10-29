@@ -7,6 +7,7 @@
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QLockFile>
 #include <QPainter>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -107,6 +108,10 @@ QList<WallpaperSet> SetLibrary::sets() const {
 }
 
 OperationResult SetLibrary::rename(const QString &id, const QString &name) const {
+    QLockFile lock(QDir(root).filePath(".operation.lock"));
+    lock.setStaleLockTime(0);
+    if (!lock.tryLock()) return OperationResult::failure(OperationError::Collision,
+        QObject::tr("A library operation is in progress. Try again shortly."));
     if (name.trimmed().isEmpty() || name.trimmed().size() > 200)
         return failure(QObject::tr("Choose a name between 1 and 200 characters."));
     WallpaperSet set;
@@ -117,7 +122,13 @@ OperationResult SetLibrary::rename(const QString &id, const QString &name) const
 }
 
 OperationResult SetLibrary::reapply(const QString &id, const QList<QRect> &layout,
-                                   PlasmaApplicator &applicator) const {
+                                   PlasmaApplicator &applicator, bool *applicationAttempted) const {
+    if (applicationAttempted) *applicationAttempted = false;
+    if (!QFileInfo(root).isDir()) return failure(QObject::tr("The wallpaper library is unavailable."));
+    QLockFile lock(QDir(root).filePath(".operation.lock"));
+    lock.setStaleLockTime(0);
+    if (!lock.tryLock()) return OperationResult::failure(OperationError::Collision,
+        QObject::tr("A library operation is in progress. Try again shortly."));
     WallpaperSet set;
     auto result = load(id, &set);
     if (!result.success) return result;
@@ -134,6 +145,7 @@ OperationResult SetLibrary::reapply(const QString &id, const QList<QRect> &layou
     // Decode every crop before touching Plasma, including images with valid headers but damaged data.
     for (const auto &path : set.paths)
         if (QImage(path).isNull()) return failure(QObject::tr("A generated image cannot be decoded."));
+    if (applicationAttempted) *applicationAttempted = true;
     result = applicator.apply(set.screens, set.paths);
     set.manifest.insert("status", result.success ? "applied" : "failed");
     set.manifest.insert("lastAppliedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
@@ -153,6 +165,10 @@ OperationResult SetLibrary::exportSet(const QString &id, const ExportOptions &op
 }
 
 OperationResult SetLibrary::remove(const QString &id, PlasmaApplicator &applicator) const {
+    QLockFile lock(QDir(root).filePath(".operation.lock"));
+    lock.setStaleLockTime(0);
+    if (!lock.tryLock()) return OperationResult::failure(OperationError::Collision,
+        QObject::tr("A library operation is in progress. Try again shortly."));
     WallpaperSet set;
     auto result = load(id, &set);
     if (!result.success) return result;

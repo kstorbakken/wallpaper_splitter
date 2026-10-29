@@ -20,8 +20,10 @@ public:
     QList<WallpaperSet> sets() const;
     OperationResult load(const QString &id, WallpaperSet *set) const;
     OperationResult rename(const QString &id, const QString &name) const;
+    // applicationAttempted distinguishes unusable sets from failures after
+    // touching Plasma, so a slideshow can safely skip only the former.
     OperationResult reapply(const QString &id, const QList<QRect> &layout,
-                            PlasmaApplicator &applicator) const;
+                            PlasmaApplicator &applicator, bool *applicationAttempted = nullptr) const;
     OperationResult exportSet(const QString &id, const ExportOptions &options) const;
     OperationResult remove(const QString &id, PlasmaApplicator &applicator) const;
     static QImage preview(const WallpaperSet &set, const QSize &size);

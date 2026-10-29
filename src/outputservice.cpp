@@ -1,4 +1,5 @@
 #include "outputservice.h"
+#include <QLockFile>
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -428,6 +429,13 @@ OperationResult OutputService::applyManaged(const QImage &image,
             ? QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
                       .filePath(QStringLiteral("wallpaper-splitter/sets"))
             : managedRoot;
+    if (!QDir().mkpath(setsRoot))
+        return OperationResult::failure(OperationError::FileSystem,
+                                        QObject::tr("Could not create the wallpaper library."));
+    QLockFile lock(QDir(setsRoot).filePath(".operation.lock"));
+    lock.setStaleLockTime(0);
+    if (!lock.tryLock()) return OperationResult::failure(OperationError::Collision,
+        QObject::tr("A library operation is in progress. Try again shortly."));
     const QString setDirectory = QDir(setsRoot).filePath(setId);
     if (!QDir().mkpath(setDirectory)) {
         return OperationResult::failure(OperationError::FileSystem,

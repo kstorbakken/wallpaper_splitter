@@ -6,6 +6,7 @@
 #include <iostream>
 
 #include "appsettings.h"
+#include "slideshow.h"
 #include "outputservice.h"
 #include "wallpapersplitter.h"
 
@@ -114,6 +115,10 @@ int main(int argc, char *argv[]) {
     parser.addPositionalArgument(QStringLiteral("input"),
                                  QCoreApplication::translate("main", "Image to split."));
     parser.addOptions({
+            {QStringLiteral("slideshow-next"),
+             QCoreApplication::translate("commandline", "Apply the next saved slideshow set and exit (also works when paused).")},
+            {QStringLiteral("slideshow-tick"),
+             QCoreApplication::translate("commandline", "Advance the slideshow only if automatic rotation is enabled (scheduler use).")},
             {{QStringLiteral("d"), QStringLiteral("destination")},
              QCoreApplication::translate("commandline", "Export images into <directory>."),
              QCoreApplication::translate("commandline", "directory")},
@@ -144,6 +149,18 @@ int main(int argc, char *argv[]) {
     parser.process(app);
 
     const QStringList arguments = parser.positionalArguments();
+    if (parser.isSet("slideshow-next") || parser.isSet("slideshow-tick")) {
+        if (!arguments.isEmpty() || parser.optionNames().size() != 1) {
+            std::cerr << "Slideshow commands cannot be combined with an input image or other options.\n";
+            return 2;
+        }
+        QList<QRect> layout;
+        for (auto *screen : QGuiApplication::screens()) layout.append(screen->geometry());
+        DBusPlasmaApplicator applicator;
+        const auto result = Slideshow().next(layout, applicator, parser.isSet("slideshow-tick"));
+        if (!result.success) std::cerr << qPrintable(result.message) << '\n';
+        return result.success ? 0 : exitCode(result.error);
+    }
     if (arguments.size() != 1) {
         std::cerr << qPrintable(QCoreApplication::translate(
                 "commandline", "Exactly one input image is required.")) << '\n';

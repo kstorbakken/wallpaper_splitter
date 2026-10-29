@@ -35,6 +35,8 @@ qt_add_executable(wallpaper_splitter
         src/settingsdialog.cpp
         src/setlibrary.cpp
         src/setlibrarydialog.cpp
+        src/slideshow.cpp
+        src/slideshowdialog.cpp
         src/monitorlayout.cpp
         src/monitorsdialog.cpp
 )
@@ -111,6 +113,8 @@ if(BUILD_TESTING)
             src/settingsdialog.cpp
             src/setlibrary.cpp
             src/setlibrarydialog.cpp
+            src/slideshow.cpp
+            src/slideshowdialog.cpp
             src/monitorlayout.cpp
             src/monitorsdialog.cpp)
     target_include_directories(splitimage_test PRIVATE src)
@@ -126,4 +130,17 @@ if(BUILD_TESTING)
     add_test(NAME splitimage_test COMMAND splitimage_test)
     set_tests_properties(splitimage_test PROPERTIES
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    qt_add_executable(slideshow_test
+            tests/slideshow_test.cpp
+            src/slideshow.cpp
+            src/slideshowdialog.cpp
+            src/setlibrary.cpp
+            src/outputservice.cpp)
+    target_include_directories(slideshow_test PRIVATE src)
+    target_link_libraries(slideshow_test PRIVATE
+            Qt6::Core Qt6::DBus Qt6::Gui Qt6::Widgets Qt6::Test KF6::ConfigCore)
+    add_dependencies(slideshow_test wallpaper_splitter)
+    add_test(NAME slideshow_test COMMAND slideshow_test)
+    set_tests_properties(slideshow_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

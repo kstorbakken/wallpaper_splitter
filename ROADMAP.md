@@ -57,6 +57,15 @@ including other activities and disconnected monitors. If references cannot be
 checked or still use the set, deletion is blocked. Source images and exports
 remain user-owned.
 
+### Library slideshows
+
+The Library's **Slideshow…** dialog supports a saved playlist, adjustable interval,
+ordered or shuffled playback, manual advancement, and automatic rotation while the
+application is closed. A systemd user timer launches a single switch and the process
+exits afterward. Rotation follows the active Plasma activity and skips missing or
+incompatible sets. The playlist and last successful position survive app restarts;
+AppImage users can repair the launch path by saving from the new AppImage location.
+
 ### Source image plus crop mappings
 
 Investigate a future mode that stores only the original image and per-monitor
