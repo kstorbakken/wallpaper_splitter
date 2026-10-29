@@ -48,6 +48,15 @@ UserPreferences AppSettings::load() {
     preferences.closeAfterApply = settings.value(QStringLiteral("behavior/closeAfterApply"), true).toBool();
     preferences.inputDirectory = settings.value(QStringLiteral("folders/input"), picturesDirectory()).toString();
     preferences.exportDirectory = settings.value(QStringLiteral("folders/export"), picturesDirectory()).toString();
+    preferences.libraryDirectory = OutputService::defaultManagedRoot();
+    preferences.previewSeconds = qBound(1, settings.value(QStringLiteral("behavior/previewSeconds"), 15).toInt(), 300);
+    preferences.batchLayout = static_cast<BatchLayout>(qBound(0,
+            settings.value(QStringLiteral("batch/layout"), 0).toInt(), 2));
+    preferences.batchToLibrary = settings.value(QStringLiteral("batch/toLibrary"), false).toBool();
+    CollisionPolicy batchPolicy;
+    if (OutputService::parseCollisionPolicy(settings.value(QStringLiteral("batch/collisionPolicy"),
+            QStringLiteral("revision")).toString(), &batchPolicy) && batchPolicy != CollisionPolicy::Ask)
+        preferences.batchCollisionPolicy = batchPolicy;
     preferences.fileNameTemplate = settings.value(QStringLiteral("output/fileNameTemplate"),
                                                   QStringLiteral("{source}-{number}")).toString();
     CollisionPolicy policy;
@@ -73,6 +82,11 @@ void AppSettings::save(const UserPreferences &preferences) {
     settings.setValue(QStringLiteral("behavior/closeAfterApply"), preferences.closeAfterApply);
     settings.setValue(QStringLiteral("folders/input"), preferences.inputDirectory);
     settings.setValue(QStringLiteral("folders/export"), preferences.exportDirectory);
+    settings.setValue(QStringLiteral("folders/library"), preferences.libraryDirectory);
+    settings.setValue(QStringLiteral("behavior/previewSeconds"), preferences.previewSeconds);
+    settings.setValue(QStringLiteral("batch/layout"), int(preferences.batchLayout));
+    settings.setValue(QStringLiteral("batch/toLibrary"), preferences.batchToLibrary);
+    settings.setValue(QStringLiteral("batch/collisionPolicy"), OutputService::collisionPolicyName(preferences.batchCollisionPolicy));
     settings.setValue(QStringLiteral("output/fileNameTemplate"), preferences.fileNameTemplate);
     settings.setValue(QStringLiteral("output/collisionPolicy"),
                       OutputService::collisionPolicyName(preferences.collisionPolicy));
@@ -87,6 +101,7 @@ void AppSettings::reset() {
     settings.remove(QStringLiteral("folders"));
     settings.remove(QStringLiteral("output"));
     settings.remove(QStringLiteral("behavior"));
+    settings.remove(QStringLiteral("batch"));
 }
 
 MonitorPreferences AppSettings::loadMonitors() {

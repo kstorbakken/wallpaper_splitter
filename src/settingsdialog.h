@@ -22,9 +22,12 @@ private slots:
     void resetDefaults();
 
 private:
+    UserPreferences initialPreferences;
     QCheckBox *closeAfterApply{};
     QLineEdit *inputDirectory{};
     QLineEdit *exportDirectory{};
+    QLineEdit *libraryDirectory{};
+    QSpinBox *previewSeconds{};
     QLineEdit *fileNameTemplate{};
     QComboBox *collisionPolicy{};
     QComboBox *outputFormat{};

@@ -26,6 +26,9 @@ This is an overview of the currently supported functionality.
 - [x] Export with configurable filenames and collision handling
 - [x] Browse, reapply, rename, and delete saved wallpaper sets
 - [x] Rotate saved sets on a schedule while the app is closed
+- [x] Batch split a folder into exports or saved library sets
+- [x] Choose a custom library folder
+- [x] Temporarily preview on the desktop and restore the previous wallpaper
 - [x] Remember input and export folders
 - [x] Account for physical monitor sizes and bezel gaps
 - [x] Stretch the entire source image across the combined monitor layout
@@ -127,6 +130,28 @@ original image. The active icon stays highlighted; click it again to return to
 the initially loaded view, or click the other icon to switch modes. Loading a
 new image clears the active mode.
 
+Choose <kbd>Open → Split folder…</kbd> to process every supported image directly
+inside a folder. Select **Export** or **Library (save without applying)**, then
+choose centered largest fit, stretch, or panorama for each image. Physical monitor
+settings, image format, JPEG quality, and the export filename template are reused.
+The batch destination, layout, collision choice, and folders are remembered as
+defaults for the next batch, including after restarting the app. Each image is
+fitted automatically; manual crop positioning from the editor is not copied.
+Subfolders are excluded. Export to a different folder to keep source images safe.
+Batch exports default to creating revisions, and offer replace or skip on collisions.
+Cancel stops before the next image and keeps completed output; the final summary
+lists failures and skipped images.
+
+Click <kbd>Preview</kbd> to temporarily apply the current crop to the desktop.
+The editor minimizes while a countdown and **End Preview** button are shown.
+The previous wallpaper returns after **15 seconds** by default, when you end the
+preview, or when you close the preview dialog. Change **Preview duration** in
+<kbd>Settings → General</kbd> (1–300 seconds). Preview uses temporary crops and
+does not add a set to the library or write to your export folder. Temporary files
+are removed after Plasma confirms restoration; if restoration fails, the dialog
+keeps them and offers another attempt. The application's slideshow cannot switch
+wallpapers during a preview. Other activities' wallpapers are left as they were.
+
 Use <kbd>Settings → General</kbd> to choose the remembered input and export folders, the
 export filename template, image format and JPEG quality, and what happens when an export
 already exists. Automatic format keeps PNG sources lossless, uses high-quality JPEG for
@@ -138,7 +163,14 @@ closing after Apply is enabled by default.
 Templates support `{source}`, `{screen}`, `{number}`, `{revision}`, and
 `{digest}`.
 
-Use <kbd>Library</kbd> to browse applied sets, with a preview, source image path,
+Set **Library folder** in <kbd>Settings → General</kbd> to choose a different
+location for managed sets. Apply, the Library, batch saves, and slideshow rotation
+all use that location. Existing sets stay in their original folder; switch back
+to access them. If you switch to another library, choose its sets in the slideshow
+playlist before resuming rotation. **Restore Defaults** returns to the standard
+library folder and resets the remembered batch choices and preview duration.
+
+Use <kbd>Library</kbd> to browse saved sets, with a preview, source image path,
 creation time, monitor layout, crop mappings, and generated file paths. Reapply
 requires the saved monitor positions and resolutions to match the current layout;
 the original source image is not needed. Export saves a set's existing crops using
@@ -259,7 +291,8 @@ desktop-coordinate layout. Saved library sets retain their original crop mapping
 Preferences follow the XDG base-directory convention and are stored in
 `~/.config/wallpaper-splitter/settings.conf`. Existing preferences from older
 versions are migrated automatically. Managed wallpaper sets created by
-<kbd>Apply</kbd> are stored in `~/.local/share/wallpaper-splitter/sets`.
+<kbd>Apply</kbd> or a library batch are stored in `~/.local/share/wallpaper-splitter/sets`
+by default, or in your configured library folder.
 
 ## Command line
 

@@ -1,4 +1,5 @@
 #include "setlibrary.h"
+#include "wallpaperpreview.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -35,9 +36,7 @@ OperationResult save(const WallpaperSet &set) {
 }
 
 SetLibrary::SetLibrary(const QString &managedRoot)
-    : root(managedRoot.isEmpty()
-           ? QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
-                 .filePath("wallpaper-splitter/sets") : managedRoot) {}
+    : root(managedRoot.isEmpty() ? OutputService::defaultManagedRoot() : managedRoot) {}
 
 OperationResult SetLibrary::load(const QString &id, WallpaperSet *set) const {
     if (set == nullptr) return failure(QObject::tr("No set output was provided."));
@@ -124,6 +123,11 @@ OperationResult SetLibrary::rename(const QString &id, const QString &name) const
 OperationResult SetLibrary::reapply(const QString &id, const QList<QRect> &layout,
                                    PlasmaApplicator &applicator, bool *applicationAttempted) const {
     if (applicationAttempted) *applicationAttempted = false;
+    QDir().mkpath(QFileInfo(WallpaperPreview::lockPath()).absolutePath());
+    QLockFile previewLock(WallpaperPreview::lockPath());
+    previewLock.setStaleLockTime(0);
+    if (!previewLock.tryLock()) return OperationResult::failure(OperationError::Collision,
+            QObject::tr("A wallpaper preview is active. Try again after it ends."));
     if (!QFileInfo(root).isDir()) return failure(QObject::tr("The wallpaper library is unavailable."));
     QLockFile lock(QDir(root).filePath(".operation.lock"));
     lock.setStaleLockTime(0);

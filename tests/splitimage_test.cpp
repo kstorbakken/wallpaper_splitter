@@ -1,4 +1,6 @@
 #include <QColor>
+#include <QComboBox>
+#include <QTimer>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <limits>
@@ -36,6 +38,8 @@
 #include "setlibrarydialog.h"
 #include "monitorlayout.h"
 #include "monitorsdialog.h"
+#include "batchsplitter.h"
+#include "wallpaperpreview.h"
 
 namespace {
 class FakePlasmaApplicator final : public PlasmaApplicator {
@@ -53,6 +57,23 @@ public:
     }
 
     OperationResult wallpaperReferences() override { return references; }
+    OperationResult captureWallpaper(QJsonArray *snapshot) override {
+        ++captures;
+        if (!captureSucceeds) return OperationResult::failure(OperationError::Plasma, "capture failed");
+        *snapshot = QJsonArray{QJsonObject{{"id", 42}, {"plugin", "org.kde.slideshow"}, {"image", "old.png"}}};
+        return OperationResult::ok();
+    }
+    OperationResult restoreWallpaper(const QJsonArray &snapshot) override {
+        ++restores;
+        restoredState = snapshot;
+        return restoreSucceeds ? OperationResult::ok()
+            : OperationResult::failure(OperationError::Plasma, "restore failed");
+    }
+    bool captureSucceeds{true};
+    bool restoreSucceeds{true};
+    int captures{0};
+    int restores{0};
+    QJsonArray restoredState;
     OperationResult references = OperationResult::failure(OperationError::Plasma, "unavailable");
     bool succeeds;
     bool called{false};
@@ -65,6 +86,12 @@ class SplitImageTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void batchFolderAndLayoutModes();
+    void batchDialogUsesRememberedDefaults();
+    void customLibrarySavesWithoutApplying();
+    void previewRestoresAndCleansTemporaryFiles();
+    void previewHandlesFailuresAndBlocksApply();
+    void previewScriptsRestoreDesktopIdentityAndPlugin();
     void preservesRectangleOrderAndPixels();
     void changesPathsWhenCropContentChanges();
     void movesTranslatedLayoutInsideSource();
@@ -111,6 +138,206 @@ private slots:
     void layoutButtonsToggleBackToLoadedState();
     void panoramaPreviewKeepsThreeMonitorsSeparate();
 };
+
+
+void SplitImageTest::batchDialogUsesRememberedDefaults() {
+    const auto previous = AppSettings::load();
+    auto preferences = previous;
+    preferences.batchLayout = BatchLayout::Stretch;
+    preferences.batchToLibrary = true;
+    preferences.batchCollisionPolicy = CollisionPolicy::Replace;
+    AppSettings::save(preferences);
+    WallpaperSplitter splitter;
+    int layoutIndex = -1;
+    int targetIndex = -1;
+    int collisionPolicy = -1;
+    bool collisionsDisabled = false;
+    QTimer::singleShot(0, &splitter, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (!dialog) return;
+        auto *mode = dialog->findChild<QComboBox *>("batchLayout");
+        auto *target = dialog->findChild<QComboBox *>("batchDestination");
+        auto *collision = dialog->findChild<QComboBox *>("batchCollisionPolicy");
+        if (mode && target && collision) {
+            layoutIndex = mode->currentIndex();
+            targetIndex = target->currentIndex();
+            collisionPolicy = collision->currentData().toInt();
+            collisionsDisabled = !collision->isEnabled();
+        }
+        dialog->reject();
+    });
+    const bool invoked = QMetaObject::invokeMethod(&splitter, "splitFolder", Qt::DirectConnection);
+    AppSettings::save(previous);
+    QVERIFY(invoked);
+    QCOMPARE(layoutIndex, int(BatchLayout::Stretch));
+    QCOMPARE(targetIndex, 1);
+    QCOMPARE(collisionPolicy, int(CollisionPolicy::Replace));
+    QVERIFY(collisionsDisabled);
+}
+
+void SplitImageTest::batchFolderAndLayoutModes() {
+    QTemporaryDir folder;
+    QImage source(40, 40, QImage::Format_RGB32);
+    source.fill(Qt::red);
+    QVERIFY(source.save(folder.filePath("one.PNG")));
+    QVERIFY(source.save(folder.filePath("two.jpg")));
+    QDir(folder.path()).mkdir("nested");
+    QVERIFY(source.save(folder.filePath("nested/ignored.png")));
+    QFile text(folder.filePath("notes.txt"));
+    QVERIFY(text.open(QIODevice::WriteOnly));
+    text.write("not an image");
+    text.close();
+    QCOMPARE(BatchSplitter::imagesInFolder(folder.path()).size(), 2);
+    const QList<MonitorInfo> monitors{
+        {"a", "DP-1", QRect(-20, 0, 20, 10), {}, {}},
+        {"b", "DP-2", QRect(0, 0, 20, 10), {}, {}}};
+    for (const auto mode : {BatchLayout::Centered, BatchLayout::Stretch, BatchLayout::Panorama}) {
+        QImage rendered;
+        QList<ScreenCrop> screens;
+        QVERIFY(BatchSplitter::prepare(source, monitors, {}, mode, &rendered, &screens).success);
+        QCOMPARE(screens.size(), 2);
+        QCOMPARE(screens[0].desktopGeometry, monitors[0].desktopGeometry);
+        QCOMPARE(screens[0].cropRect.size(), QSize(20, 10));
+        QCOMPARE(screens[1].cropRect.x() - screens[0].cropRect.x(), 20);
+        QCOMPARE(rendered.size(), mode == BatchLayout::Centered ? QSize(40, 40) : QSize(40, 10));
+        if (mode == BatchLayout::Centered) QCOMPARE(screens[0].cropRect.y(), 15);
+        QList<CropArtifact> crops;
+        QVERIFY(OutputService::createCrops(rendered, screens, &crops).success);
+        QCOMPARE(crops[1].image.pixelColor(5, 5), QColor(Qt::red));
+    }
+    QImage rendered;
+    QList<ScreenCrop> screens;
+    QVERIFY(!BatchSplitter::prepare({}, monitors, {}, BatchLayout::Centered, &rendered, &screens).success);
+    QVERIFY(!BatchSplitter::prepare(source, {}, {}, BatchLayout::Centered, &rendered, &screens).success);
+}
+
+void SplitImageTest::customLibrarySavesWithoutApplying() {
+    QTemporaryDir folder;
+    const auto previous = AppSettings::load();
+    auto preferences = previous;
+    preferences.libraryDirectory = folder.filePath("custom-library");
+    AppSettings::save(preferences);
+    QCOMPARE(OutputService::defaultManagedRoot(), preferences.libraryDirectory);
+    QImage image(20, 10, QImage::Format_RGB32);
+    image.fill(Qt::green);
+    const QList<ScreenCrop> screens{{"DP-1", 1, image.rect(), image.rect()}};
+    const auto result = OutputService::saveManaged(image, image.size(), screens, "example.jpg", "/example.jpg",
+                                                   {}, OutputFormat::Png);
+    // Restore settings before any assertion can return from this test.
+    const auto sets = SetLibrary().sets();
+    AppSettings::save(previous);
+    QVERIFY2(result.success, qPrintable(result.message));
+    QCOMPARE(sets.size(), 1);
+    QCOMPARE(sets[0].manifest.value("status").toString(), "prepared");
+    QVERIFY(result.paths[0].endsWith(".png"));
+    QVERIFY(result.paths[0].startsWith(preferences.libraryDirectory + '/'));
+    QVERIFY(SetLibrary(folder.filePath("other-library")).sets().isEmpty());
+}
+
+void SplitImageTest::previewRestoresAndCleansTemporaryFiles() {
+    QImage image(20, 10, QImage::Format_RGB32);
+    image.fill(Qt::blue);
+    const QList<ScreenCrop> screens{{"DP-1", 1, image.rect(), image.rect()}};
+    FakePlasmaApplicator plasma(true);
+    QString path;
+    {
+        WallpaperPreview preview(plasma);
+        const auto result = preview.start(image, screens);
+        QVERIFY2(result.success, qPrintable(result.message));
+        QVERIFY(preview.active());
+        QCOMPARE(plasma.receivedPaths.size(), 1);
+        path = plasma.receivedPaths[0];
+        QVERIFY(QFileInfo::exists(path));
+        QCOMPARE(QImage(path), image);
+        QVERIFY(!QFileInfo::exists(QDir(QFileInfo(path).absolutePath()).filePath("manifest.json")));
+        QVERIFY(preview.finish().success);
+        QVERIFY(!preview.active());
+        QCOMPARE(plasma.restoredState[0].toObject().value("plugin").toString(), "org.kde.slideshow");
+        QVERIFY(!QFileInfo::exists(path));
+        QVERIFY(preview.finish().success);
+        QCOMPARE(plasma.restores, 1);
+    }
+    {
+        WallpaperPreview preview(plasma);
+        QVERIFY(preview.start(image, screens).success);
+        path = plasma.receivedPaths[0];
+    }
+    QCOMPARE(plasma.restores, 2);
+    QVERIFY(!QFileInfo::exists(path));
+}
+
+void SplitImageTest::previewHandlesFailuresAndBlocksApply() {
+    QTemporaryDir library;
+    QImage image(20, 10, QImage::Format_RGB32);
+    image.fill(Qt::blue);
+    const QList<ScreenCrop> screens{{"DP-1", 1, image.rect(), image.rect()}};
+    FakePlasmaApplicator plasma(true);
+    {
+        plasma.captureSucceeds = false;
+        WallpaperPreview preview(plasma);
+        QVERIFY(!preview.start(image, screens).success);
+        QVERIFY(!plasma.called);
+        QVERIFY(!preview.active());
+    }
+    plasma.captureSucceeds = true;
+    {
+        plasma.succeeds = false;
+        WallpaperPreview preview(plasma);
+        QVERIFY(!preview.start(image, screens).success);
+        QCOMPARE(plasma.restores, 1);
+        QVERIFY(!preview.active());
+    }
+    plasma.succeeds = true;
+    {
+        WallpaperPreview preview(plasma);
+        QVERIFY(preview.start(image, screens).success);
+        FakePlasmaApplicator other(true);
+        const auto blocked = OutputService::applyManaged(image, image.size(), screens, "test.png", {}, other, library.path());
+        QCOMPARE(blocked.error, OperationError::Collision);
+        QVERIFY(!other.called);
+        plasma.restoreSucceeds = false;
+        QVERIFY(!preview.finish().success);
+        QVERIFY(preview.active());
+        QVERIFY(QFileInfo::exists(plasma.receivedPaths[0]));
+        plasma.restoreSucceeds = true;
+        QVERIFY(preview.finish().success);
+        QVERIFY(OutputService::applyManaged(image, image.size(), screens, "test.png", {}, other, library.path()).success);
+        QVERIFY(other.called);
+    }
+}
+
+void SplitImageTest::previewScriptsRestoreDesktopIdentityAndPlugin() {
+    QJSEngine engine;
+    QVERIFY(!engine.evaluate(R"(
+var output = '';
+var screenCount = 2;
+var entries = [
+    {id: 8, screen: 1, wallpaperPlugin: 'org.kde.slideshow', image: 'before-right.png'},
+    {id: 2, screen: 0, wallpaperPlugin: 'org.kde.image', image: 'before-left.png'},
+    {id: 99, screen: -1, wallpaperPlugin: 'other', image: 'inactive.png'}];
+for (const desktop of entries) {
+    desktop.readConfig = function(key, fallback) { return this.image; };
+    desktop.writeConfig = function(key, value) { this.image = value; };
+}
+function currentActivity() { return 'original'; }
+function desktopsForActivity(activity) { return entries; }
+function desktops() { return entries.slice().reverse(); }
+function print(message) { output = message; }
+)").isError());
+    auto result = engine.evaluate(DBusPlasmaApplicator::captureScript());
+    QVERIFY2(!result.isError(), qPrintable(result.toString()));
+    const auto text = engine.globalObject().property("output").toString();
+    const auto snapshot = QJsonDocument::fromJson(text.mid(text.indexOf('[')).toUtf8()).array();
+    QCOMPARE(snapshot.size(), 2);
+    engine.evaluate("entries[0].image = 'preview.png'; entries[1].image = 'preview.png'; entries[0].wallpaperPlugin = 'org.kde.image';");
+    result = engine.evaluate(DBusPlasmaApplicator::restoreScript(snapshot));
+    QVERIFY2(!result.isError(), qPrintable(result.toString()));
+    QCOMPARE(engine.evaluate("entries[0].image").toString(), "before-right.png");
+    QCOMPARE(engine.evaluate("entries[0].wallpaperPlugin").toString(), "org.kde.slideshow");
+    QCOMPARE(engine.evaluate("entries[1].image").toString(), "before-left.png");
+    QCOMPARE(engine.evaluate("entries[2].image").toString(), "inactive.png");
+    QCOMPARE(engine.globalObject().property("output").toString(), "WALLPAPER_SPLITTER_RESTORED 2");
+}
 
 void SplitImageTest::preservesRectangleOrderAndPixels() {
     QImage source(30, 10, QImage::Format_RGB32);
@@ -580,11 +807,20 @@ void SplitImageTest::persistsOutputSettings() {
     QCOMPARE(defaults.collisionPolicy, CollisionPolicy::Ask);
     QCOMPARE(defaults.outputFormat, OutputFormat::Automatic);
     QCOMPARE(defaults.jpegQuality, 90);
+    QCOMPARE(defaults.previewSeconds, 15);
+    QCOMPARE(defaults.batchLayout, BatchLayout::Centered);
+    QVERIFY(!defaults.batchToLibrary);
+    QCOMPARE(defaults.batchCollisionPolicy, CollisionPolicy::Revision);
     const UserPreferences original = AppSettings::load();
     UserPreferences expected;
     expected.closeAfterApply = false;
     expected.inputDirectory = QStringLiteral("/tmp/input-wallpapers");
     expected.exportDirectory = QStringLiteral("/tmp/export-wallpapers");
+    expected.libraryDirectory = QStringLiteral("/tmp/custom-wallpaper-library");
+    expected.previewSeconds = 42;
+    expected.batchLayout = BatchLayout::Panorama;
+    expected.batchToLibrary = true;
+    expected.batchCollisionPolicy = CollisionPolicy::Fail;
     expected.fileNameTemplate = QStringLiteral("{screen}-{number}{revision}");
     expected.collisionPolicy = CollisionPolicy::Revision;
     expected.outputFormat = OutputFormat::Png;
@@ -595,12 +831,25 @@ void SplitImageTest::persistsOutputSettings() {
     QVERIFY(!actual.closeAfterApply);
     QCOMPARE(actual.inputDirectory, expected.inputDirectory);
     QCOMPARE(actual.exportDirectory, expected.exportDirectory);
+    QCOMPARE(actual.libraryDirectory, expected.libraryDirectory);
+    QCOMPARE(actual.previewSeconds, 42);
+    QCOMPARE(actual.batchLayout, BatchLayout::Panorama);
+    QVERIFY(actual.batchToLibrary);
+    QCOMPARE(actual.batchCollisionPolicy, CollisionPolicy::Fail);
+    SettingsDialog dialog(actual);
+    QCOMPARE(dialog.preferences().batchLayout, actual.batchLayout);
+    QCOMPARE(dialog.preferences().batchToLibrary, actual.batchToLibrary);
+    QCOMPARE(dialog.preferences().batchCollisionPolicy, actual.batchCollisionPolicy);
+    QCOMPARE(dialog.preferences().previewSeconds, 42);
     QCOMPARE(actual.fileNameTemplate, expected.fileNameTemplate);
     QCOMPARE(actual.collisionPolicy, expected.collisionPolicy);
     QCOMPARE(actual.outputFormat, expected.outputFormat);
     QCOMPARE(actual.jpegQuality, expected.jpegQuality);
     AppSettings::reset();
     QVERIFY(AppSettings::load().closeAfterApply);
+    QCOMPARE(AppSettings::load().batchLayout, BatchLayout::Centered);
+    QVERIFY(!AppSettings::load().batchToLibrary);
+    QCOMPARE(AppSettings::load().batchCollisionPolicy, CollisionPolicy::Revision);
     AppSettings::save(original);
 }
 

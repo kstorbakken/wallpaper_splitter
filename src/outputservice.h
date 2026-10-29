@@ -1,6 +1,7 @@
 #ifndef WALLPAPER_SPLITTER_OUTPUTSERVICE_H
 #define WALLPAPER_SPLITTER_OUTPUTSERVICE_H
 
+#include <QJsonArray>
 #include <QImage>
 #include <QObject>
 #include <QList>
@@ -61,6 +62,12 @@ public:
         return OperationResult::failure(OperationError::Plasma,
                                          QObject::tr("Plasma wallpaper references could not be checked."));
     }
+    virtual OperationResult captureWallpaper(QJsonArray *) {
+        return OperationResult::failure(OperationError::Plasma, QObject::tr("Wallpaper capture is unavailable."));
+    }
+    virtual OperationResult restoreWallpaper(const QJsonArray &) {
+        return OperationResult::failure(OperationError::Plasma, QObject::tr("Wallpaper restoration is unavailable."));
+    }
     virtual OperationResult apply(const QList<ScreenCrop> &screens,
                                   const QStringList &paths) = 0;
 };
@@ -70,12 +77,23 @@ public:
     OperationResult apply(const QList<ScreenCrop> &screens,
                           const QStringList &paths) override;
     OperationResult wallpaperReferences() override;
+    OperationResult captureWallpaper(QJsonArray *snapshot) override;
+    OperationResult restoreWallpaper(const QJsonArray &snapshot) override;
+    static QString captureScript();
+    static QString restoreScript(const QJsonArray &snapshot);
     static QString buildScript(const QList<ScreenCrop> &screens,
                                const QStringList &paths);
+private:
+    QString previewActivity;
 };
 
 class OutputService {
 public:
+    static QString defaultManagedRoot();
+    static OperationResult saveManaged(const QImage &image, const QSize &originalSize,
+                                       const QList<ScreenCrop> &screens, const QString &sourceName,
+                                       const QString &sourcePath, const QString &managedRoot = {},
+                                       OutputFormat format = OutputFormat::Automatic, int jpegQuality = 90);
     static OperationResult createCrops(const QImage &image,
                                        const QList<ScreenCrop> &screens,
                                        QList<CropArtifact> *artifacts);
@@ -101,6 +119,12 @@ public:
     static bool parseCollisionPolicy(const QString &value, CollisionPolicy *policy);
     static QString outputFormatName(OutputFormat format);
     static bool parseOutputFormat(const QString &value, OutputFormat *format);
+private:
+    static OperationResult writeManaged(const QImage &image, const QSize &originalSize,
+                                        const QList<ScreenCrop> &screens, const QString &sourceName,
+                                        const QString &sourcePath, PlasmaApplicator *applicator,
+                                        const QString &managedRoot, OutputFormat format, int jpegQuality);
+
 };
 
 #endif
