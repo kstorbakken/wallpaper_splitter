@@ -1,0 +1,182 @@
+name: Build and test release targets
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: Create release packages after validation
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: debian
+            image: debian:trixie-slim
+            generator: DEB
+            install: >-
+              apt-get update && apt-get install --yes --no-install-recommends
+              appstream build-essential ca-certificates cmake desktop-file-utils
+              dpkg-dev extra-cmake-modules file git libkf6configwidgets-dev
+              ninja-build qt6-base-dev qt6-declarative-dev qt6-image-formats-plugins
+              qt6-wayland systemd
+          - target: rpm
+            image: fedora:latest
+            generator: RPM
+            install: >-
+              dnf install --assumeyes appstream cmake desktop-file-utils
+              extra-cmake-modules gcc-c++ git kf6-kconfigwidgets-devel ninja-build
+              qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtimageformats
+              qt6-qtwayland rpm-build systemd
+          - target: arch
+            image: archlinux:base-devel
+            generator: ""
+            install: >-
+              pacman --sync --refresh --sysupgrade --noconfirm appstream cmake
+              desktop-file-utils extra-cmake-modules git kconfigwidgets ninja
+              qt6-base qt6-declarative qt6-imageformats qt6-wayland systemd
+          - target: appimage
+            # KDE neon supplies KF6 on the existing Ubuntu 24.04 AppImage base.
+            image: invent-registry.kde.org/neon/docker-images/plasma:user
+            generator: ""
+            install: >-
+              sudo apt-get update && sudo apt-get install --yes --no-install-recommends
+              appstream build-essential ca-certificates cmake desktop-file-utils
+              extra-cmake-modules file git libkf6configwidgets-dev
+              libqt6waylandcompositor6 ninja-build qt6-base-dev qt6-declarative-dev
+              qt6-image-formats-plugins qt6-wayland systemd weston wget
+
+    steps:
+      - name: Install build, test, and packaging dependencies
+        run: ${{ matrix.install }}
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify release versions
+        run: |
+          project_version="$(sed -nE 's/^project\(wallpaper_splitter VERSION ([^ ]+) .*/\1/p' CMakeLists.txt)"
+          if [[ '${{ github.ref_type }}' == 'tag' ]]; then
+            test "${GITHUB_REF_NAME}" = "v${project_version}"
+          fi
+          if [[ '${{ matrix.target }}' == 'arch' ]]; then
+            package_version="$(sed -nE 's/^pkgver=(.*)$/\1/p' packaging/arch/PKGBUILD)"
+            test "${project_version}" = "${package_version}"
+          fi
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=ON
+          cmake --build build --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Validate application metadata
+        run: |
+          appstreamcli validate --no-net assets/metainfo.xml
+          desktop-file-validate assets/wallpaper_splitter.desktop
+
+      - name: Build Debian or RPM package
+        if: inputs.package && matrix.generator != ''
+        run: cpack --config build/CPackConfig.cmake -G "${{ matrix.generator }}" -B dist
+
+      - name: Create pacman package
+        if: inputs.package && matrix.target == 'arch'
+        run: |
+          DESTDIR="${PWD}/build/pkgroot" cmake --install build --strip
+          # Share metadata with local makepkg builds, especially runtime plugins.
+          startdir="${PWD}/packaging/arch"
+          source packaging/arch/PKGBUILD
+          installed_size="$(du --summarize --bytes build/pkgroot | cut --fields=1)"
+          printf '%s\n' \
+            "pkgname = ${pkgname}" "pkgbase = ${pkgname}" \
+            "pkgver = ${pkgver}-${pkgrel}" "pkgdesc = ${pkgdesc}" "url = ${url}" \
+            "builddate = $(date +%s)" 'packager = Wallpaper Splitter release CI' \
+            "size = ${installed_size}" 'arch = x86_64' > build/pkgroot/.PKGINFO
+          for entry in "${license[@]}"; do printf 'license = %s\n' "${entry}"; done >> build/pkgroot/.PKGINFO
+          for entry in "${depends[@]}"; do printf 'depend = %s\n' "${entry}"; done >> build/pkgroot/.PKGINFO
+          mkdir -p dist
+          bsdtar --create --file "dist/${pkgname}-${pkgver}-${pkgrel}-x86_64.pkg.tar.zst" \
+            --zstd --cd build/pkgroot .
+
+      - name: Stage AppImage and download packaging tools
+        if: inputs.package && matrix.target == 'appimage'
+        run: |
+          DESTDIR="${PWD}/AppDir" cmake --install build --strip
+          mkdir -p tools
+          wget --quiet --output-document tools/linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget --quiet --output-document tools/linuxdeploy-plugin-qt-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x tools/*.AppImage
+
+      - name: Build AppImage with Wayland and image plugins
+        if: inputs.package && matrix.target == 'appimage'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          EXTRA_QT_MODULES: waylandcompositor
+          QMAKE: qmake6
+        run: |
+          version="$(sed -nE 's/^project\(wallpaper_splitter VERSION ([^ ]+) .*/\1/p' CMakeLists.txt)"
+          # Qt ships either a unified Wayland plugin or separate EGL/generic plugins.
+          plugin_dir="$(qmake6 -query QT_INSTALL_PLUGINS)"
+          shopt -s nullglob
+          wayland_plugins=("${plugin_dir}"/platforms/libqwayland*.so)
+          test "${#wayland_plugins[@]}" -gt 0
+          export EXTRA_PLATFORM_PLUGINS=libqoffscreen.so
+          for plugin in "${wayland_plugins[@]}"; do
+            EXTRA_PLATFORM_PLUGINS+=";${plugin##*/}"
+          done
+          tools/linuxdeploy-x86_64.AppImage \
+            --appdir AppDir --executable AppDir/usr/bin/wallpaper_splitter \
+            --desktop-file AppDir/usr/share/applications/io.github.kstorbakken.wallpaper_splitter.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/io.github.kstorbakken.wallpaper_splitter.svg \
+            --plugin qt --output appimage
+          test -f AppDir/usr/plugins/imageformats/libqwebp.so
+          test -f AppDir/usr/plugins/wayland-shell-integration/libxdg-shell.so
+          mkdir -p dist
+          mv ./*.AppImage "dist/wallpaper-splitter-${version}-x86_64.AppImage"
+
+      - name: Smoke-test native Wayland startup
+        if: matrix.target == 'appimage'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          QT_QPA_PLATFORM: wayland
+        run: |
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          chmod 700 "${XDG_RUNTIME_DIR}"
+          export WAYLAND_DISPLAY=wallpaper-splitter-test
+          weston --backend=headless-backend.so --use-pixman --idle-time=0 \
+            --socket="${WAYLAND_DISPLAY}" --no-config --log="${XDG_RUNTIME_DIR}/weston.log" &
+          compositor_pid=$!
+          trap 'kill "${compositor_pid}" 2>/dev/null || true; rm -rf "${XDG_RUNTIME_DIR}"' EXIT
+          for attempt in {1..50}; do
+            test ! -S "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}" || break
+            sleep 0.1
+          done
+          test -S "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}" || { cat "${XDG_RUNTIME_DIR}/weston.log"; exit 1; }
+          executable=(build/wallpaper_splitter)
+          if [[ '${{ inputs.package }}' == 'true' ]]; then executable=(dist/*.AppImage); fi
+          "${executable[@]}" --version
+
+      - name: Upload package
+        if: inputs.package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-package
+          path: dist/*
+          if-no-files-found: error

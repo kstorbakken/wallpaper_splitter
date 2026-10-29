@@ -1,6 +1,7 @@
 #include "monitorlayout.h"
 #include <QCryptographicHash>
 #include <QGuiApplication>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QScreen>
@@ -46,22 +47,20 @@ QString MonitorLayout::identity(const QString &manufacturer, const QString &mode
 
 QList<MonitorInfo> MonitorLayout::connectedMonitors() {
     QList<MonitorInfo> result;
+    QHash<QString, int> identities;
     for (const auto *screen : QGuiApplication::screens()) {
         result.append({identity(screen->manufacturer(), screen->model(), screen->serialNumber(), screen->name()),
                        screen->name(), screen->geometry(), screen->physicalSize(),
                        screen->model().isEmpty() ? screen->name()
                            : screen->name() + " — " + screen->model()});
+        ++identities[result.constLast().id];
     }
     // Some displays report the same nonempty serial; avoid sharing their settings.
     for (int i = 0; i < result.size(); ++i) {
-        const auto *screen = QGuiApplication::screens().at(i);
-        int duplicates = 0;
-        for (const auto *other : QGuiApplication::screens())
-            if (identity(other->manufacturer(), other->model(), other->serialNumber(), other->name())
-                == identity(screen->manufacturer(), screen->model(), screen->serialNumber(), screen->name()))
-                ++duplicates;
-        if (duplicates > 1)
+        if (identities.value(result[i].id) > 1) {
+            const auto *screen = QGuiApplication::screens().at(i);
             result[i].id = identity(screen->manufacturer(), screen->model(), {}, screen->name());
+        }
     }
     return result;
 }
@@ -156,16 +155,13 @@ QList<MonitorMeasurement> MonitorLayout::measurements(const QList<MonitorInfo> &
 QList<QRectF> MonitorLayout::rectangles(const QList<MonitorInfo> &monitors,
                                       const MonitorPreferences &preferences) {
     QList<QRectF> result;
-    const auto physical = measurements(monitors, preferences);
-    for (int i = 0; i < monitors.size(); ++i) {
-        if (!preferences.enabled) {
-            result.append(monitors[i].desktopGeometry);
-        } else {
-            // One shared scene scale keeps equal physical lengths equal even when
-            // monitor resolutions or desktop scale factors differ.
-            const auto dimensions = physical[i];
-            result.append(QRectF(dimensions.position * 4, dimensions.millimeters * 4));
-        }
+    if (!preferences.enabled) {
+        for (const auto &monitor : monitors) result.append(monitor.desktopGeometry);
+        return result;
     }
+    // One shared scene scale keeps equal physical lengths equal even when
+    // monitor resolutions or desktop scale factors differ.
+    for (const auto &dimensions : measurements(monitors, preferences))
+        result.append(QRectF(dimensions.position * 4, dimensions.millimeters * 4));
     return result;
 }

@@ -21,6 +21,8 @@ RUN pacman --sync --refresh --sysupgrade --noconfirm \
         procps-ng \
         qt6-base \
         qt6-declarative \
+        qt6-imageformats \
+        qt6-wayland \
         sudo \
         which \
     && pacman --sync --clean --clean --noconfirm \

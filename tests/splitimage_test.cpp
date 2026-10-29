@@ -94,6 +94,7 @@ private slots:
     void previewScriptsRestoreDesktopIdentityAndPlugin();
     void preservesRectangleOrderAndPixels();
     void changesPathsWhenCropContentChanges();
+    void cropDigestsTrackPaletteAndIgnorePadding();
     void movesTranslatedLayoutInsideSource();
     void resizeStretchesAndKeepsOppositeCorner();
     void resizeKeepsAspectRatioWithShift();
@@ -401,6 +402,31 @@ void SplitImageTest::changesPathsWhenCropContentChanges() {
         QVERIFY(QFileInfo::exists(firstPaths.at(index)));
         QVERIFY(QFileInfo::exists(secondPaths.at(index)));
     }
+}
+
+void SplitImageTest::cropDigestsTrackPaletteAndIgnorePadding() {
+    const auto digest = [&](const QImage &image) {
+        QList<CropArtifact> crops;
+        const QList<ScreenCrop> screens{{"DP-1", 1, image.rect(), image.rect()}};
+        const auto result = OutputService::createCrops(image, screens, &crops);
+        return result.success ? crops.first().digest : QString();
+    };
+    QImage indexed(4, 2, QImage::Format_Indexed8);
+    indexed.setColorTable({qRgb(255, 0, 0)});
+    indexed.fill(0);
+    const auto red = digest(indexed);
+    QVERIFY(!red.isEmpty());
+    QCOMPARE(digest(indexed), red);
+    indexed.setColor(0, qRgb(0, 0, 255));
+    QVERIFY(digest(indexed) != red);
+
+    // Identical RGB pixels with different unused bytes at the end of each row.
+    const uchar first[] = {255, 0, 0, 0, 255, 0, 0, 0};
+    const uchar second[] = {255, 0, 0, 255, 255, 0, 0, 255};
+    const QImage a(first, 1, 2, 4, QImage::Format_RGB888);
+    const QImage b(second, 1, 2, 4, QImage::Format_RGB888);
+    QVERIFY(!digest(a).isEmpty());
+    QCOMPARE(digest(a), digest(b));
 }
 
 void SplitImageTest::movesTranslatedLayoutInsideSource() {

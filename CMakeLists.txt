@@ -22,8 +22,8 @@ qt_standard_project_setup()
 find_package(KF6ConfigWidgets REQUIRED)
 find_package(KF6Config REQUIRED)
 
-qt_add_executable(wallpaper_splitter
-        src/main.cpp
+# Compile application code once and share it with both regression executables.
+add_library(wallpaper_splitter_core STATIC
         src/wallpapersplitter.cpp
         src/wallpapersplitter.ui
         src/screensitem.cpp
@@ -43,7 +43,8 @@ qt_add_executable(wallpaper_splitter
         src/monitorsdialog.cpp
 )
 
-target_link_libraries(wallpaper_splitter PRIVATE
+target_include_directories(wallpaper_splitter_core PUBLIC src)
+target_link_libraries(wallpaper_splitter_core PUBLIC
         Qt6::Core
         Qt6::DBus
         Qt6::Gui
@@ -51,6 +52,9 @@ target_link_libraries(wallpaper_splitter PRIVATE
         KF6::ConfigWidgets
         KF6::ConfigCore
 )
+
+qt_add_executable(wallpaper_splitter src/main.cpp)
+target_link_libraries(wallpaper_splitter PRIVATE wallpaper_splitter_core)
 
 target_compile_definitions(wallpaper_splitter PRIVATE
         WALLPAPER_SPLITTER_APP_ID="${WALLPAPER_SPLITTER_APP_ID}"
@@ -88,11 +92,13 @@ set(CPACK_PACKAGE_FILE_NAME
 
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "qt6-image-formats-plugins, qt6-wayland")
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-only")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 set(CPACK_RPM_PACKAGE_AUTOREQ ON)
+set(CPACK_RPM_PACKAGE_REQUIRES "qt6-qtimageformats, qt6-qtwayland")
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 
 include(CPack)
@@ -101,52 +107,14 @@ include(CTest)
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test Qml)
 
-    qt_add_executable(splitimage_test
-            tests/splitimage_test.cpp
-            src/wallpapersplitter.cpp
-            src/wallpapersplitter.ui
-            src/screensitem.cpp
-            src/graphicsview.cpp
-            src/centeredtextitem.cpp
-            src/resizableimageitem.cpp)
-    target_sources(splitimage_test PRIVATE
-            src/outputservice.cpp
-            src/wallpaperpreview.cpp
-            src/batchsplitter.cpp
-            src/appsettings.cpp
-            src/settingsdialog.cpp
-            src/setlibrary.cpp
-            src/setlibrarydialog.cpp
-            src/slideshow.cpp
-            src/slideshowdialog.cpp
-            src/monitorlayout.cpp
-            src/monitorsdialog.cpp)
-    target_include_directories(splitimage_test PRIVATE src)
-    target_link_libraries(splitimage_test PRIVATE
-            Qt6::Core
-            Qt6::DBus
-            Qt6::Gui
-            Qt6::Test
-            Qt6::Qml
-            Qt6::Widgets
-            KF6::ConfigWidgets
-            KF6::ConfigCore)
-    add_test(NAME splitimage_test COMMAND splitimage_test)
-    set_tests_properties(splitimage_test PROPERTIES
-            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-config/splitimage")
-
-    qt_add_executable(slideshow_test
-            tests/slideshow_test.cpp
-            src/slideshow.cpp
-            src/slideshowdialog.cpp
-            src/setlibrary.cpp
-            src/outputservice.cpp
-            src/wallpaperpreview.cpp)
-    target_include_directories(slideshow_test PRIVATE src)
-    target_link_libraries(slideshow_test PRIVATE
-            Qt6::Core Qt6::DBus Qt6::Gui Qt6::Widgets Qt6::Test KF6::ConfigCore)
-    add_dependencies(slideshow_test wallpaper_splitter)
-    add_test(NAME slideshow_test COMMAND slideshow_test)
-    set_tests_properties(slideshow_test PROPERTIES
-            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-config/slideshow")
+    foreach(test_name IN ITEMS splitimage slideshow)
+        qt_add_executable(${test_name}_test tests/${test_name}_test.cpp)
+        target_link_libraries(${test_name}_test PRIVATE wallpaper_splitter_core Qt6::Test)
+        # Both suites exercise the real CLI, including targeted test builds.
+        add_dependencies(${test_name}_test wallpaper_splitter)
+        add_test(NAME ${test_name}_test COMMAND ${test_name}_test)
+        set_tests_properties(${test_name}_test PROPERTIES
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-config/${test_name}")
+    endforeach()
+    target_link_libraries(splitimage_test PRIVATE Qt6::Qml)
 endif()

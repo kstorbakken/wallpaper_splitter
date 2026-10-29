@@ -11,6 +11,7 @@
 On KDE it is not possible to apply an image so that it spans across all of your screens.
 This tool fixes that by splitting your image according to your screen setup.
 It can also directly apply the image as your wallpaper.
+The supported desktop target is **KDE Plasma 6 on Wayland**.
 ![Screenshot of the app](assets/screenshot.png)
 
 Keep in mind that this only works with images, not with any fancy wallpaper engine or even dynamic wallpapers.
@@ -354,6 +355,8 @@ for more on that see their documentation provided [here](https://develop.kde.org
 Wallpaper Splitter requires a C++20 compiler, CMake 3.20 or newer, Qt 6, and
 KDE Frameworks 6 ConfigWidgets. Building the tests also requires Qt 6 Qml
 (`qt6-declarative` on Arch, `qt6-declarative-dev` on Debian).
+Source installations also need Qt's Wayland and image-format plugins for native
+Wayland startup and formats such as WebP; see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
