@@ -470,8 +470,10 @@ void WallpaperSplitter::previewWallpaper() {
     dialog.setWindowTitle(tr("Wallpaper preview"));
     dialog.setWindowFlag(Qt::WindowStaysOnTopHint);
     auto *layout = new QVBoxLayout(&dialog);
+    layout->setSizeConstraint(QLayout::SetFixedSize);
     auto *label = new QLabel(&dialog);
     label->setWordWrap(true);
+    label->setMinimumWidth(label->fontMetrics().averageCharWidth() * 48);
     layout->addWidget(label);
     auto *end = new QPushButton(tr("End Preview"), &dialog);
     end->setObjectName(QStringLiteral("endPreviewButton"));

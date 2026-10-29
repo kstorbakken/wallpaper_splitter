@@ -9,6 +9,57 @@ Tests also require Qt 6 Qml (`qt6-declarative` on Arch or
 `qt6-declarative-dev` on Debian) to execute the Plasma wallpaper script in
 QJSEngine with simulated desktops. The application itself does not require Qml.
 
+The supported desktop target is KDE Plasma 6 on Wayland. For source installs,
+include the runtime plugins that release packages already declare:
+
+| Distribution | Wayland plugin | Additional image formats (including WebP) |
+| --- | --- | --- |
+| Debian / KDE neon | `qt6-wayland` | `qt6-image-formats-plugins` |
+| Fedora | `qt6-qtwayland` | `qt6-qtimageformats` |
+| Arch Linux | `qt6-wayland` | `qt6-imageformats` |
+
+The shared workflow in `.github/workflows/build.yml` builds and tests Debian
+Trixie, Fedora, Arch, and KDE neon for pull requests and tagged releases. Each
+target validates the application metadata before packaging. KDE neon also checks
+native Wayland startup with a headless Weston compositor; release builds run
+that check against the AppImage and verify its WebP and Wayland shell plugins.
+These checks do not replace integration testing in a real Plasma session.
+
+Application sources compile into one internal static library shared by the GUI,
+CLI, and regression suites. Building either test target also builds the CLI that
+its tests execute. Only the application and desktop metadata are installed.
+
+## Build from source
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+To install it after building:
+
+```sh
+sudo cmake --install build
+```
+
+Use `-DBUILD_TESTING=OFF` when you only need the application.
+For end-user packages, see [Installation](docs/installation.md).
+
+## Updating the screenshot
+
+The README and AppStream metadata both use `assets/screenshot.png`. Keep that
+path when replacing the image so both stay up to date. Capture the current
+editor with an image loaded, readable monitor outlines, and all footer controls
+visible. Use wallpaper artwork you have permission to redistribute and avoid
+personal paths or other private information.
+
+The current image is a capture of the application’s Qt widgets using the
+offscreen platform, Fusion style, a dark color scheme, an example three-monitor
+layout, and an original illustrated landscape. It shows the editor; it does not
+demonstrate a live Plasma wallpaper application. A capture from a Plasma Wayland
+session can replace it at the same path.
+
 ## Arch Linux devcontainer
 
 The included `.devcontainer/` definition uses `archlinux:base-devel` with the

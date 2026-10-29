@@ -285,6 +285,26 @@ OperationResult Slideshow::configure(const SlideshowSettings &settings, Slidesho
     return result;
 }
 
+OperationResult Slideshow::removeSets(const QStringList &setIds, SlideshowScheduler &scheduler) const {
+    if (setIds.isEmpty() || !QFileInfo::exists(fileName)) return OperationResult::ok();
+    QLockFile lock(fileName + ".lock");
+    lock.setStaleLockTime(0);
+    if (!lock.tryLock()) return failure(QObject::tr("A slideshow operation is in progress. Try again shortly."));
+    SlideshowSettings settings;
+    auto result = load(&settings);
+    if (!result.success) return result;
+    const auto previous = settings.setIds;
+    for (const auto &id : setIds) settings.setIds.removeAll(id);
+    if (settings.setIds == previous) return OperationResult::ok();
+    if (setIds.contains(settings.lastSetId)) settings.lastSetId.clear();
+    const bool empty = settings.setIds.isEmpty();
+    if (empty) settings.enabled = false;
+    // Save the disabled state before stopping the timer, just as configure does.
+    result = save(settings);
+    if (!result.success) return result;
+    return empty ? scheduler.disable() : result;
+}
+
 OperationResult Slideshow::next(const QList<QRect> &layout, PlasmaApplicator &applicator,
                                bool automatic) const {
     if (!QDir().mkpath(QFileInfo(fileName).absolutePath()))

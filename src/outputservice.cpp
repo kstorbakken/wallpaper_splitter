@@ -35,11 +35,11 @@ bool hasVisibleTransparency(const QImage &image) {
 }
 
 OutputFormat automaticFormat(const QImage &image, const QString &sourceName = {}) {
-    if (hasVisibleTransparency(image)) return OutputFormat::Png;
     // Preserve the lossless character of PNG inputs. Other opaque wallpaper
     // formats are normally photographic and benefit substantially from JPEG.
-    return QFileInfo(sourceName).suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) == 0
-            ? OutputFormat::Png : OutputFormat::Jpeg;
+    if (QFileInfo(sourceName).suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) == 0
+        || hasVisibleTransparency(image)) return OutputFormat::Png;
+    return OutputFormat::Jpeg;
 }
 
 OutputFormat encodedFormat(const QString &path) {
@@ -119,8 +119,11 @@ OperationResult writeJson(const QJsonObject &object, const QString &path) {
 }
 
 QString cropDigest(const QImage &image) {
-    const QByteArrayView pixels(reinterpret_cast<const char *>(image.constBits()),
-                                image.sizeInBytes());
+    // Palette indexes omit colors and packed formats can contain unused row
+    // padding. Hash their actual colors; preserve higher-precision pixel data.
+    const QImage packed = image.depth() < 32 ? image.convertToFormat(QImage::Format_ARGB32) : image;
+    const QByteArrayView pixels(reinterpret_cast<const char *>(packed.constBits()),
+                                packed.sizeInBytes());
     return QString::fromLatin1(QCryptographicHash::hash(pixels, QCryptographicHash::Sha256)
                                        .toHex().left(16));
 }

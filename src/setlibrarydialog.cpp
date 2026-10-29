@@ -171,17 +171,22 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
         if (question.exec() != QMessageBox::Yes) return;
         DBusPlasmaApplicator applicator;
         QStringList failures;
-        int deleted = 0;
+        QStringList deletedIds;
         for (int i = 0; i < ids.size(); ++i) {
             const auto result = library.remove(ids[i], applicator);
-            if (result.success) ++deleted;
+            if (result.success) deletedIds.append(ids[i]);
             else failures.append(tr("%1: %2").arg(names.value(i), result.message));
         }
+        SystemdSlideshowScheduler scheduler;
+        const auto updated = Slideshow().removeSets(deletedIds, scheduler);
+        if (!updated.success)
+            QMessageBox::warning(this, tr("Could not update slideshow"),
+                tr("The deleted sets could not be removed from the slideshow playlist. %1").arg(updated.message));
         refresh();
         if (failures.isEmpty()) {
-            status->setText(tr("Deleted %n wallpaper set(s).", nullptr, deleted));
+            status->setText(tr("Deleted %n wallpaper set(s).", nullptr, deletedIds.size()));
         } else {
-            status->setText(tr("Deleted %1 of %2 selected wallpaper sets.").arg(deleted).arg(ids.size()));
+            status->setText(tr("Deleted %1 of %2 selected wallpaper sets.").arg(deletedIds.size()).arg(ids.size()));
             QMessageBox warning(QMessageBox::Warning, tr("Some wallpaper sets were not deleted"),
                 tr("%n selected set(s) could not be deleted.", nullptr, failures.size()),
                 QMessageBox::Ok, this);
