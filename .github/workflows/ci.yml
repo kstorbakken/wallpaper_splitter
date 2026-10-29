@@ -27,6 +27,7 @@ jobs:
             extra-cmake-modules \
             git \
             libkf6configwidgets-dev \
+            systemd \
             qt6-base-dev \
             qt6-declarative-dev
 

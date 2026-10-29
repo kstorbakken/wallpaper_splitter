@@ -1,5 +1,6 @@
 #include "setlibrarydialog.h"
 #include "appsettings.h"
+#include "slideshowdialog.h"
 #include <QCheckBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
@@ -35,6 +36,14 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
     selectAllCheckBox->setTristate(true);
     selectionControls->addWidget(selectAllCheckBox);
     selectionControls->addStretch();
+    auto *slideshowButton = new QPushButton(tr("Slideshow…"), this);
+    slideshowButton->setObjectName("configureSlideshow");
+    selectionControls->addWidget(slideshowButton);
+    connect(slideshowButton, &QPushButton::clicked, this, [this, root] {
+        SlideshowDialog dialog(this, root);
+        dialog.exec();
+        refresh();
+    });
     layout->addLayout(selectionControls);
     auto *splitter = new QSplitter(this);
     list = new QListWidget(splitter);
