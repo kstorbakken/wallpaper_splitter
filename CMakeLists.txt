@@ -31,6 +31,8 @@ qt_add_executable(wallpaper_splitter
         src/centeredtextitem.cpp
         src/resizableimageitem.cpp
         src/outputservice.cpp
+        src/wallpaperpreview.cpp
+        src/batchsplitter.cpp
         src/appsettings.cpp
         src/settingsdialog.cpp
         src/setlibrary.cpp
@@ -109,6 +111,8 @@ if(BUILD_TESTING)
             src/resizableimageitem.cpp)
     target_sources(splitimage_test PRIVATE
             src/outputservice.cpp
+            src/wallpaperpreview.cpp
+            src/batchsplitter.cpp
             src/appsettings.cpp
             src/settingsdialog.cpp
             src/setlibrary.cpp
@@ -129,18 +133,20 @@ if(BUILD_TESTING)
             KF6::ConfigCore)
     add_test(NAME splitimage_test COMMAND splitimage_test)
     set_tests_properties(splitimage_test PROPERTIES
-            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-config/splitimage")
 
     qt_add_executable(slideshow_test
             tests/slideshow_test.cpp
             src/slideshow.cpp
             src/slideshowdialog.cpp
             src/setlibrary.cpp
-            src/outputservice.cpp)
+            src/outputservice.cpp
+            src/wallpaperpreview.cpp)
     target_include_directories(slideshow_test PRIVATE src)
     target_link_libraries(slideshow_test PRIVATE
             Qt6::Core Qt6::DBus Qt6::Gui Qt6::Widgets Qt6::Test KF6::ConfigCore)
     add_dependencies(slideshow_test wallpaper_splitter)
     add_test(NAME slideshow_test COMMAND slideshow_test)
-    set_tests_properties(slideshow_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    set_tests_properties(slideshow_test PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-config/slideshow")
 endif()

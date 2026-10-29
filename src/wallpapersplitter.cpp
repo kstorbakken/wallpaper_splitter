@@ -1,6 +1,14 @@
 #include "wallpapersplitter.h"
 
 #include <QApplication>
+#include <QComboBox>
+#include <QFormLayout>
+#include <QLineEdit>
+#include <QLabel>
+#include <QProgressDialog>
+#include <QTimer>
+#include "batchsplitter.h"
+#include "wallpaperpreview.h"
 #include <QFileDialog>
 #include <QGraphicsScene>
 #include <QMessageBox>
@@ -38,8 +46,20 @@ WallpaperSplitter::WallpaperSplitter(QWidget *parent)
     openButton->setText(tr("Open"));
     ui->settingsButton->setIcon(QIcon::fromTheme(QStringLiteral("configure"),
                                                style()->standardIcon(QStyle::SP_FileDialogDetailedView)));
+    auto *openMenu = new QMenu(openButton);
+    openMenu->addAction(tr("Open image…"), this, &WallpaperSplitter::selectImage);
+    auto *folderAction = openMenu->addAction(tr("Split folder…"), this, &WallpaperSplitter::splitFolder);
+    folderAction->setObjectName(QStringLiteral("splitFolderAction"));
+    openButton->setMenu(openMenu);
     auto *applyButton = ui->buttonBox->button(QDialogButtonBox::Ok);
     auto *exportButton = ui->exportButton;
+    previewButton = new QPushButton(tr("Preview"), this);
+    previewButton->setObjectName(QStringLiteral("previewButton"));
+    previewButton->setAutoDefault(false);
+    previewButton->setEnabled(false);
+    previewButton->setToolTip(tr("Temporarily try this wallpaper, then restore the previous one."));
+    ui->footerLayout->insertWidget(ui->footerLayout->count() - 2, previewButton);
+    connect(previewButton, &QPushButton::clicked, this, &WallpaperSplitter::previewWallpaper);
     applyButton->setText(tr("Apply"));
     exportButton->setText(tr("Export"));
     exportButton->setIcon(QIcon::fromTheme(QStringLiteral("document-save-as"),
@@ -120,6 +140,7 @@ void WallpaperSplitter::displayImage(const QImage &image) {
     refreshMonitors();
     ui->buttonBox->button(QDialogButtonBox::Ok)->setEnabled(true);
     ui->exportButton->setEnabled(true);
+    previewButton->setEnabled(true);
     auto *view = static_cast<GraphicsView *>(ui->graphicsView);
     for (auto *button : {view->stretchButton(), view->panoramaButton()}) {
         button->setEnabled(true);
@@ -308,4 +329,176 @@ void WallpaperSplitter::scaleView() {
     }
     ui->graphicsView->fitInView(scene->itemsBoundingRect(), Qt::KeepAspectRatio);
     ui->graphicsView->centerOn(imageItem);
+}
+
+void WallpaperSplitter::splitFolder() {
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Split folder"));
+    dialog.resize(580, 300);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *form = new QFormLayout;
+    const auto folderRow = [&dialog, form](const QString &label, const QString &initial) {
+        auto *row = new QWidget(&dialog);
+        auto *line = new QHBoxLayout(row);
+        line->setContentsMargins(0, 0, 0, 0);
+        auto *edit = new QLineEdit(initial, row);
+        auto *browse = new QPushButton(QObject::tr("Browse"), row);
+        browse->setAutoDefault(false);
+        line->addWidget(edit);
+        line->addWidget(browse);
+        QObject::connect(browse, &QPushButton::clicked, &dialog, [&dialog, edit] {
+            const auto folder = QFileDialog::getExistingDirectory(&dialog, QObject::tr("Select folder"), edit->text());
+            if (!folder.isEmpty()) edit->setText(folder);
+        });
+        form->addRow(label, row);
+        return edit;
+    };
+    auto *input = folderRow(tr("Source folder:"), preferences.inputDirectory);
+    auto *target = new QComboBox(&dialog);
+    target->setObjectName(QStringLiteral("batchDestination"));
+    target->addItems({tr("Export"), tr("Library (save without applying)")});
+    form->addRow(tr("Save to:"), target);
+    auto *output = folderRow(tr("Export folder:"), preferences.exportDirectory);
+    auto *mode = new QComboBox(&dialog);
+    mode->setObjectName(QStringLiteral("batchLayout"));
+    mode->addItems({tr("Centered largest fit"), tr("Stretch across screens"), tr("Fill panorama")});
+    mode->setCurrentIndex(int(preferences.batchLayout));
+    form->addRow(tr("Layout for each image:"), mode);
+    auto *collision = new QComboBox(&dialog);
+    collision->setObjectName(QStringLiteral("batchCollisionPolicy"));
+    collision->addItem(tr("Create a new revision"), int(CollisionPolicy::Revision));
+    collision->addItem(tr("Replace existing files"), int(CollisionPolicy::Replace));
+    collision->addItem(tr("Skip existing files"), int(CollisionPolicy::Fail));
+    collision->setCurrentIndex(qMax(0, collision->findData(int(preferences.batchCollisionPolicy))));
+    form->addRow(tr("When export files exist:"), collision);
+    connect(target, &QComboBox::currentIndexChanged, &dialog, [output, collision](int index) {
+        output->parentWidget()->setEnabled(index == 0);
+        collision->setEnabled(index == 0);
+    });
+    target->setCurrentIndex(preferences.batchToLibrary ? 1 : 0);
+    layout->addLayout(form);
+    auto *help = new QLabel(tr("Batch choices are remembered for next time. Processes images directly inside the folder using your monitor settings, image format, "
+                               "JPEG quality and filename template. Subfolders are excluded. "
+                               "Library destination: %1").arg(OutputService::defaultManagedRoot()), &dialog);
+    help->setWordWrap(true);
+    layout->addWidget(help);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Split folder"));
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+        if (!QFileInfo(input->text()).isDir()) {
+            QMessageBox::warning(&dialog, tr("Invalid folder"), tr("Choose an existing source folder."));
+            return;
+        }
+        if (target->currentIndex() == 0 && (output->text().trimmed().isEmpty()
+            || !QDir().mkpath(output->text())
+            || QFileInfo(input->text()).canonicalFilePath() == QFileInfo(output->text()).canonicalFilePath())) {
+            QMessageBox::warning(&dialog, tr("Invalid export folder"),
+                                 tr("Choose a writable export folder different from the source folder."));
+            return;
+        }
+        dialog.accept();
+    });
+    if (dialog.exec() != QDialog::Accepted) return;
+    preferences.batchLayout = static_cast<BatchLayout>(mode->currentIndex());
+    preferences.batchToLibrary = target->currentIndex() == 1;
+    preferences.batchCollisionPolicy = static_cast<CollisionPolicy>(collision->currentData().toInt());
+    preferences.inputDirectory = QDir(input->text()).absolutePath();
+    if (!preferences.batchToLibrary) preferences.exportDirectory = QDir(output->text()).absolutePath();
+    AppSettings::save(preferences);
+    const auto files = BatchSplitter::imagesInFolder(input->text());
+    if (files.isEmpty()) {
+        QMessageBox::information(this, tr("Split folder"), tr("No supported images were found in this folder."));
+        return;
+    }
+    const auto monitors = MonitorLayout::connectedMonitors();
+    const auto monitorPreferences = AppSettings::loadMonitors();
+    const auto batchMode = static_cast<BatchLayout>(mode->currentIndex());
+    ExportOptions options{output->text(), preferences.fileNameTemplate,
+                          static_cast<CollisionPolicy>(collision->currentData().toInt()),
+                          preferences.outputFormat, preferences.jpegQuality};
+    QProgressDialog progress(tr("Splitting images…"), tr("Cancel"), 0, files.size(), this);
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setMinimumDuration(0);
+    int completed = 0;
+    int processed = 0;
+    QStringList problems;
+    for (const auto &path : files) {
+        progress.setValue(processed);
+        progress.setLabelText(tr("Splitting %1").arg(QFileInfo(path).fileName()));
+        QApplication::processEvents();
+        if (progress.wasCanceled()) break;
+        const QImage source(path);
+        QImage image;
+        QList<ScreenCrop> screens;
+        auto result = BatchSplitter::prepare(source, monitors, monitorPreferences, batchMode, &image, &screens);
+        if (result.success) {
+            const QFileInfo file(path);
+            result = target->currentIndex() == 0
+                ? OutputService::exportCrops(image, screens, file.fileName(), options)
+                : OutputService::saveManaged(image, source.size(), screens, file.fileName(), path, {},
+                                              preferences.outputFormat, preferences.jpegQuality);
+        }
+        if (result.success) ++completed;
+        else problems.append(tr("%1: %2").arg(QFileInfo(path).fileName(), result.message));
+        ++processed;
+    }
+    const bool canceled = progress.wasCanceled();
+    progress.setValue(files.size());
+    QMessageBox summary(QMessageBox::Information, tr("Split folder"),
+        tr("%1 of %2 images saved. %3 failed or skipped.%4")
+            .arg(completed).arg(files.size()).arg(problems.size())
+            .arg(canceled ? tr(" Processing was canceled; completed images were kept.") : QString()),
+        QMessageBox::Ok, this);
+    if (!problems.isEmpty()) summary.setDetailedText(problems.join('\n'));
+    summary.exec();
+}
+
+void WallpaperSplitter::previewWallpaper() {
+    if (!imageItem) return;
+    DBusPlasmaApplicator applicator;
+    WallpaperPreview preview(applicator);
+    const auto started = preview.start(imageItem->image(), currentScreenCrops());
+    if (!started.success) {
+        showOperationError(started);
+        if (!preview.active()) return;
+    }
+    // Every way of closing the dialog passes through restoration. A failure
+    // leaves the dialog and temporary files available for another attempt.
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Wallpaper preview"));
+    dialog.setWindowFlag(Qt::WindowStaysOnTopHint);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *label = new QLabel(&dialog);
+    label->setWordWrap(true);
+    layout->addWidget(label);
+    auto *end = new QPushButton(tr("End Preview"), &dialog);
+    end->setObjectName(QStringLiteral("endPreviewButton"));
+    layout->addWidget(end);
+    int remaining = preferences.previewSeconds;
+    const auto updateLabel = [&] { label->setText(tr("Your previous wallpaper will return in %1 seconds.").arg(remaining)); };
+    updateLabel();
+    QTimer timer;
+    timer.setInterval(1000);
+    connect(end, &QPushButton::clicked, &dialog, &QDialog::accept);
+    connect(&timer, &QTimer::timeout, &dialog, [&] {
+        if (--remaining <= 0) dialog.accept();
+        else updateLabel();
+    });
+    timer.start();
+    const bool wasMaximized = isMaximized();
+    showMinimized();
+    for (;;) {
+        dialog.exec();
+        timer.stop();
+        const auto restored = preview.finish();
+        if (restored.success) break;
+        showOperationError(restored);
+        label->setText(tr("The previous wallpaper could not be restored. Click End Preview to retry."));
+    }
+    if (wasMaximized) showMaximized();
+    else showNormal();
+    raise();
+    activateWindow();
 }

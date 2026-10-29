@@ -27,7 +27,9 @@ here. See its [full issue history][upstream-issues] for that archival context.
 
 Persistent settings are available for:
 
-- Default input and export folders.
+- Default input, export, and library folders.
+- Preview duration (15 seconds by default).
+- Remembered batch destination, layout mode, and export collision choice.
 - An export filename template, with fields such as source name, screen name,
   screen number, and revision.
 - Collision handling: replace an existing set, create a new revision, or ask.
@@ -56,6 +58,15 @@ The library reads the versioned JSON manifests introduced in Wallpaper Splitter
 including other activities and disconnected monitors. If references cannot be
 checked or still use the set, deletion is blocked. Source images and exports
 remain user-owned.
+
+### Folder batches and temporary previews
+
+**Open → Split folder…** processes supported images directly inside a folder,
+using the monitor and encoding settings. Each batch can export crops or save
+managed sets without applying them. Layout and collision choices are remembered
+across sessions. Processing is cancelable, and the summary reports failed/skipped
+images. **Preview** uses temporary crops and restores the previous wallpaper
+after a configurable countdown or **End Preview**, without saving a library set.
 
 ### Library slideshows
 

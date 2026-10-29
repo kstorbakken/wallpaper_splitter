@@ -1,5 +1,8 @@
 #include "settingsdialog.h"
 
+#include <QDir>
+#include <QFileInfo>
+#include <QTemporaryFile>
 #include <QComboBox>
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -43,7 +46,7 @@ QString picturesDirectory() {
 }
 
 SettingsDialog::SettingsDialog(const UserPreferences &preferences, QWidget *parent)
-        : QDialog(parent) {
+        : QDialog(parent), initialPreferences(preferences) {
     setWindowTitle(tr("Settings"));
     resize(650, 430);
     setMinimumSize(560, 360);
@@ -51,6 +54,14 @@ SettingsDialog::SettingsDialog(const UserPreferences &preferences, QWidget *pare
     auto *form = new QFormLayout();
     form->addRow(tr("Input folder:"), directoryRow(&inputDirectory, this));
     form->addRow(tr("Export folder:"), directoryRow(&exportDirectory, this));
+    form->addRow(tr("Library folder:"), directoryRow(&libraryDirectory, this));
+    libraryDirectory->setObjectName(QStringLiteral("libraryDirectory"));
+    libraryDirectory->setToolTip(tr("Switches libraries. Existing sets stay in their current folder; select it again to access them."));
+    previewSeconds = new QSpinBox(this);
+    previewSeconds->setObjectName(QStringLiteral("previewSeconds"));
+    previewSeconds->setRange(1, 300);
+    previewSeconds->setSuffix(tr(" seconds"));
+    form->addRow(tr("Preview duration:"), previewSeconds);
     fileNameTemplate = new QLineEdit(this);
     fileNameTemplate->setToolTip(tr("Fields: {source}, {screen}, {number}, {revision}, {digest}"));
     form->addRow(tr("Filename template:"), fileNameTemplate);
@@ -91,6 +102,8 @@ SettingsDialog::SettingsDialog(const UserPreferences &preferences, QWidget *pare
 
     inputDirectory->setText(preferences.inputDirectory);
     exportDirectory->setText(preferences.exportDirectory);
+    libraryDirectory->setText(preferences.libraryDirectory.isEmpty() ? OutputService::defaultManagedRoot() : preferences.libraryDirectory);
+    previewSeconds->setValue(preferences.previewSeconds);
     fileNameTemplate->setText(preferences.fileNameTemplate);
     const int policyIndex = collisionPolicy->findData(
             OutputService::collisionPolicyName(preferences.collisionPolicy));
@@ -106,10 +119,12 @@ SettingsDialog::SettingsDialog(const UserPreferences &preferences, QWidget *pare
 }
 
 UserPreferences SettingsDialog::preferences() const {
-    UserPreferences result;
+    UserPreferences result = initialPreferences;
     result.closeAfterApply = closeAfterApply->isChecked();
     result.inputDirectory = inputDirectory->text().trimmed();
     result.exportDirectory = exportDirectory->text().trimmed();
+    result.libraryDirectory = QDir::cleanPath(libraryDirectory->text().trimmed());
+    result.previewSeconds = previewSeconds->value();
     result.fileNameTemplate = fileNameTemplate->text();
     OutputService::parseCollisionPolicy(collisionPolicy->currentData().toString(),
                                         &result.collisionPolicy);
@@ -132,13 +147,26 @@ void SettingsDialog::accept() {
         QMessageBox::warning(this, tr("Invalid filename template"), validation.message);
         return;
     }
+    if (libraryDirectory->text().trimmed().isEmpty() || !QFileInfo(values.libraryDirectory).isAbsolute()
+        || !QDir().mkpath(values.libraryDirectory)) {
+        QMessageBox::warning(this, tr("Invalid library folder"), tr("Choose an absolute library folder that can be created."));
+        return;
+    }
+    QTemporaryFile probe(QDir(values.libraryDirectory).filePath(".write-test-XXXXXX"));
+    if (!probe.open()) {
+        QMessageBox::warning(this, tr("Invalid library folder"), tr("The library folder is not writable."));
+        return;
+    }
     QDialog::accept();
 }
 
 void SettingsDialog::resetDefaults() {
+    initialPreferences = UserPreferences{};
     closeAfterApply->setChecked(true);
     inputDirectory->setText(picturesDirectory());
     exportDirectory->setText(picturesDirectory());
+    libraryDirectory->setText(QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)).filePath("wallpaper-splitter/sets"));
+    previewSeconds->setValue(15);
     fileNameTemplate->setText(QStringLiteral("{source}-{number}"));
     collisionPolicy->setCurrentIndex(collisionPolicy->findData(QStringLiteral("ask")));
     outputFormat->setCurrentIndex(outputFormat->findData(QStringLiteral("automatic")));

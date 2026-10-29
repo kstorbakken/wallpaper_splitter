@@ -10,6 +10,7 @@
 #include "screensitem.h"
 
 class ResizableImageItem;
+class QPushButton;
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class WallpaperSplitter; }
@@ -37,6 +38,7 @@ private:
     QFileInfo imageFile;
     QSize originalImageSize;
     UserPreferences preferences;
+    QPushButton *previewButton{};
     enum class LayoutMode { Original, Stretch, Panorama };
     LayoutMode layoutMode{LayoutMode::Original};
     void toggleLayoutMode(LayoutMode mode);
@@ -50,6 +52,8 @@ private:
 
 private slots:
     void selectImage();
+    void splitFolder();
+    void previewWallpaper();
     void applyWallpaper();
     void exportWallpapers();
     void showSettings();

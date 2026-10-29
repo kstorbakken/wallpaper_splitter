@@ -2,12 +2,18 @@
 #define WALLPAPER_SPLITTER_APPSETTINGS_H
 
 #include "outputservice.h"
+#include "batchsplitter.h"
 #include "monitorlayout.h"
 
 struct UserPreferences {
     bool closeAfterApply{true};
     QString inputDirectory;
     QString exportDirectory;
+    QString libraryDirectory;
+    int previewSeconds{15};
+    BatchLayout batchLayout{BatchLayout::Centered};
+    bool batchToLibrary{false};
+    CollisionPolicy batchCollisionPolicy{CollisionPolicy::Revision};
     QString fileNameTemplate{QStringLiteral("{source}-{number}")};
     CollisionPolicy collisionPolicy{CollisionPolicy::Ask};
     OutputFormat outputFormat{OutputFormat::Automatic};

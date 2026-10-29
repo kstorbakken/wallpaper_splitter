@@ -1,4 +1,5 @@
 #include "outputservice.h"
+#include "wallpaperpreview.h"
 #include <QLockFile>
 
 #include <QCryptographicHash>
@@ -14,6 +15,7 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QSet>
+#include <QSettings>
 #include <KConfig>
 #include <KConfigGroup>
 
@@ -413,6 +415,15 @@ OperationResult OutputService::exportCrops(const QStringList &cropPaths,
     return exportArtifacts(artifacts, sourceName, options);
 }
 
+QString OutputService::defaultManagedRoot() {
+    const QString fallback = QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
+            .filePath(QStringLiteral("wallpaper-splitter/sets"));
+    QSettings settings(QSettings::NativeFormat, QSettings::UserScope,
+                       QStringLiteral("wallpaper-splitter"), QStringLiteral("settings"));
+    const QString configured = settings.value(QStringLiteral("folders/library")).toString().trimmed();
+    return configured.isEmpty() || !QFileInfo(configured).isAbsolute() ? fallback : configured;
+}
+
 OperationResult OutputService::applyManaged(const QImage &image,
                                             const QSize &originalSize,
                                             const QList<ScreenCrop> &screens,
@@ -420,15 +431,34 @@ OperationResult OutputService::applyManaged(const QImage &image,
                                             const QString &sourcePath,
                                             PlasmaApplicator &applicator,
                                             const QString &managedRoot) {
+    QDir().mkpath(QFileInfo(WallpaperPreview::lockPath()).absolutePath());
+    QLockFile previewLock(WallpaperPreview::lockPath());
+    previewLock.setStaleLockTime(0);
+    if (!previewLock.tryLock()) return OperationResult::failure(OperationError::Collision,
+            QObject::tr("End the current preview before applying a wallpaper."));
+    return writeManaged(image, originalSize, screens, sourceName, sourcePath, &applicator,
+                        managedRoot, OutputFormat::Automatic, 90);
+}
+
+OperationResult OutputService::saveManaged(const QImage &image, const QSize &originalSize,
+                                           const QList<ScreenCrop> &screens, const QString &sourceName,
+                                           const QString &sourcePath, const QString &managedRoot,
+                                           OutputFormat format, int jpegQuality) {
+    return writeManaged(image, originalSize, screens, sourceName, sourcePath, nullptr,
+                        managedRoot, format, jpegQuality);
+}
+
+OperationResult OutputService::writeManaged(const QImage &image, const QSize &originalSize,
+                                            const QList<ScreenCrop> &screens, const QString &sourceName,
+                                            const QString &sourcePath, PlasmaApplicator *applicator,
+                                            const QString &managedRoot, OutputFormat requestedFormat,
+                                            int jpegQuality) {
     QList<CropArtifact> artifacts;
     OperationResult result = createCrops(image, screens, &artifacts);
     if (!result.success) return result;
 
     const QString setId = managedSetId(originalSize, image.size(), artifacts);
-    const QString setsRoot = managedRoot.isEmpty()
-            ? QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
-                      .filePath(QStringLiteral("wallpaper-splitter/sets"))
-            : managedRoot;
+    const QString setsRoot = managedRoot.isEmpty() ? defaultManagedRoot() : managedRoot;
     if (!QDir().mkpath(setsRoot))
         return OperationResult::failure(OperationError::FileSystem,
                                         QObject::tr("Could not create the wallpaper library."));
@@ -454,7 +484,8 @@ OperationResult OutputService::applyManaged(const QImage &image,
     QStringList relativePaths;
     for (int index = 0; index < artifacts.size(); ++index) {
         const CropArtifact &artifact = artifacts.at(index);
-        OutputFormat format = automaticFormat(artifact.image, sourceName);
+        OutputFormat format = requestedFormat == OutputFormat::Automatic
+                ? automaticFormat(artifact.image, sourceName) : requestedFormat;
         QString relative;
         if (index < previousCrops.size()) {
             const QString candidate = previousCrops.at(index).toObject()
@@ -474,7 +505,7 @@ OperationResult OutputService::applyManaged(const QImage &image,
         if (relative.isEmpty()) relative = QStringLiteral("screen-%1-%2.%3")
                 .arg(artifact.screen.number).arg(artifact.digest, extension(format));
         const QString path = QDir(setDirectory).filePath(relative);
-        result = writeImage(artifact.image, path, format, 90);
+        result = writeImage(artifact.image, path, format, jpegQuality);
         if (!result.success) return OperationResult::failure(result.error, result.message, paths);
         relativePaths.append(relative);
         paths.append(path);
@@ -486,12 +517,17 @@ OperationResult OutputService::applyManaged(const QImage &image,
                                     sourceName, sourcePath, originalSize, image.size(),
                                     artifacts, relativePaths);
     if (previous.contains("name")) manifest.insert("name", previous.value("name"));
+    if (!applicator) {
+        for (const auto &key : {"status", "lastAppliedAt", "error"})
+            if (previous.contains(key)) manifest.insert(key, previous.value(key));
+    }
     result = writeJson(manifest, manifestPath);
     if (!result.success) return OperationResult::failure(result.error, result.message, paths, manifestPath);
 
     QList<ScreenCrop> correctedScreens;
     for (const CropArtifact &artifact : artifacts) correctedScreens.append(artifact.screen);
-    OperationResult applyResult = applicator.apply(correctedScreens, paths);
+    if (!applicator) return OperationResult::ok(paths, manifestPath);
+    OperationResult applyResult = applicator->apply(correctedScreens, paths);
     const QString status = applyResult.success ? QStringLiteral("applied") : QStringLiteral("failed");
     manifest.insert("status", status);
     manifest.insert("lastAppliedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
@@ -629,7 +665,13 @@ OperationResult DBusPlasmaApplicator::apply(const QList<ScreenCrop> &screens,
     QDBusMessage message = QDBusMessage::createMethodCall(
             QStringLiteral("org.kde.plasmashell"), QStringLiteral("/PlasmaShell"),
             QStringLiteral("org.kde.PlasmaShell"), QStringLiteral("evaluateScript"));
-    message.setArguments({buildScript(screens, paths)});
+    QString script = buildScript(screens, paths);
+    if (!previewActivity.isEmpty()) {
+        const QString activity = QString::fromUtf8(QJsonDocument(QJsonArray{previewActivity}).toJson(QJsonDocument::Compact));
+        script.prepend(QStringLiteral("if (currentActivity() !== (%1)[0]) throw new Error('The active activity changed. Start preview again.');\n").arg(activity));
+        previewActivity.clear();
+    }
+    message.setArguments({script});
     const QDBusMessage reply = QDBusConnection::sessionBus().call(message);
     if (reply.type() == QDBusMessage::ErrorMessage) {
         return OperationResult::failure(OperationError::Plasma,
@@ -715,4 +757,83 @@ print('WALLPAPER_SPLITTER_REFERENCES ' + JSON.stringify(references));
     };
     for (const auto &name : config.groupList()) collect(collect, config.group(name));
     return OperationResult::ok(paths);
+}
+
+QString DBusPlasmaApplicator::captureScript() {
+    // Only Image is changed by buildScript. Other plugin configuration is left intact.
+    return QStringLiteral(R"(
+const saved = [];
+for (const desktop of desktopsForActivity(currentActivity())) {
+    if (desktop.screen < 0 || desktop.screen >= screenCount) continue;
+    const plugin = desktop.wallpaperPlugin;
+    desktop.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
+    saved.push({id: desktop.id, plugin, activity: currentActivity(), image: desktop.readConfig('Image', '')});
+}
+print('WALLPAPER_SPLITTER_SNAPSHOT ' + JSON.stringify(saved));
+)");
+}
+
+QString DBusPlasmaApplicator::restoreScript(const QJsonArray &snapshot) {
+    return QStringLiteral(R"(
+const saved = %1;
+const all = desktops();
+let restored = 0;
+for (const entry of saved) {
+    const desktop = all.find(candidate => candidate.id === entry.id);
+    if (desktop === undefined) continue;
+    desktop.currentConfigGroup = ['Wallpaper', 'org.kde.image', 'General'];
+    desktop.writeConfig('Image', entry.image);
+    desktop.wallpaperPlugin = entry.plugin;
+    restored++;
+}
+print('WALLPAPER_SPLITTER_RESTORED ' + restored);
+)").arg(QString::fromUtf8(QJsonDocument(snapshot).toJson(QJsonDocument::Compact)));
+}
+
+namespace {
+OperationResult evaluatePreviewScript(const QString &script, const QString &marker, QString *output) {
+    auto message = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.plasmashell"), QStringLiteral("/PlasmaShell"),
+            QStringLiteral("org.kde.PlasmaShell"), QStringLiteral("evaluateScript"));
+    message.setArguments({script});
+    const auto reply = QDBusConnection::sessionBus().call(message);
+    const QString text = reply.arguments().isEmpty() ? QString() : reply.arguments().first().toString();
+    const int start = text.indexOf(marker);
+    if (reply.type() == QDBusMessage::ErrorMessage || start < 0)
+        return OperationResult::failure(OperationError::Plasma,
+                QObject::tr("Plasma could not confirm the preview operation. %1").arg(reply.errorMessage()));
+    *output = text.mid(start + marker.size()).section('\n', 0, 0).trimmed();
+    return OperationResult::ok();
+}
+}
+
+OperationResult DBusPlasmaApplicator::captureWallpaper(QJsonArray *snapshot) {
+    QString output;
+    auto result = evaluatePreviewScript(captureScript(), "WALLPAPER_SPLITTER_SNAPSHOT ", &output);
+    if (!result.success) return result;
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(output.toUtf8(), &error);
+    if (!snapshot || error.error != QJsonParseError::NoError || !document.isArray() || document.array().isEmpty())
+        return OperationResult::failure(OperationError::Plasma, QObject::tr("Could not save the previous wallpaper."));
+    for (const auto &value : document.array()) {
+        const auto entry = value.toObject();
+        if (!entry.value("id").isDouble() || !entry.value("plugin").isString()
+            || entry.value("plugin").toString().isEmpty() || !entry.value("image").isString()
+            || !entry.value("activity").isString() || entry.value("activity").toString().isEmpty())
+            return OperationResult::failure(OperationError::Plasma, QObject::tr("Plasma returned invalid wallpaper state."));
+    }
+    *snapshot = document.array();
+    previewActivity = snapshot->first().toObject().value("activity").toString();
+    return OperationResult::ok();
+}
+
+OperationResult DBusPlasmaApplicator::restoreWallpaper(const QJsonArray &snapshot) {
+    QString output;
+    auto result = evaluatePreviewScript(restoreScript(snapshot), "WALLPAPER_SPLITTER_RESTORED ", &output);
+    if (!result.success) return result;
+    bool valid = false;
+    if (output.toInt(&valid) != snapshot.size() || !valid)
+        return OperationResult::failure(OperationError::Plasma,
+                QObject::tr("Some desktops could not be restored. Reconnect any removed monitors and retry End Preview."));
+    return OperationResult::ok();
 }
