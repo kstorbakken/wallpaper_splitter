@@ -37,7 +37,13 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-To install it after building:
+Run the built application directly from a terminal in your Plasma Wayland session:
+
+```sh
+./build/wallpaper_splitter
+```
+
+No package or installation is needed for local use. To install it system-wide:
 
 ```sh
 sudo cmake --install build
@@ -63,9 +69,8 @@ session can replace it at the same path.
 ## Arch Linux devcontainer
 
 The included `.devcontainer/` definition uses `archlinux:base-devel` with the
-application's build, test, metadata-validation, and pacman-packaging tools. It
-reflects the maintainer's Arch Linux/KDE workstation and makes it possible to
-build a package that can be installed on that host for integration testing.
+application's build, test, and metadata-validation tools. It reflects the
+maintainer's Arch Linux/KDE workstation.
 
 Open the repository in a Dev Containers-compatible editor and choose
 **Reopen in Container**. The repository is mounted into the container by the
@@ -81,43 +86,23 @@ ctest --test-dir build --output-on-failure
 ```
 
 The container is intended for compilation, automated tests, and static
-validation. It does not forward the host's Wayland/X11 display or KDE session
-D-Bus connection, so GUI behavior and applying a wallpaper should be tested on
-a KDE host.
-
-## Building an Arch test package
-
-The files in `packaging/arch/` build the current checkout, including
-uncommitted changes, with `makepkg`. Tests run before an unsigned package is
-written to the ignored `packages/` directory:
-
-```sh
-./packaging/arch/build-package.sh
-```
-
-On an Arch Linux host, install or upgrade the printed artifact with:
-
-```sh
-sudo pacman -U packages/wallpaper_splitter-1.5.0-1-x86_64.pkg.tar.zst
-```
-
-This local test-package workflow is separate from the packages created for
-tagged releases by GitHub Actions.
+validation. It does not forward the host's Wayland display or KDE session D-Bus
+connection. Launch `./build/wallpaper_splitter` from the mounted checkout on the
+KDE host for GUI checks and applying wallpapers.
 
 ## Preparing a release
 
 Create a `release/<version>` branch from `main`. Update the version in
-`CMakeLists.txt` and `packaging/arch/PKGBUILD`, reset `pkgrel` to `1`, add the
+`CMakeLists.txt` and `packaging/arch/metadata.sh`, reset `pkgrel` to `1`, add the
 AppStream release entry in `assets/metainfo.xml`, and update versioned package
-examples in this guide and [Installation](docs/installation.md). Release notes
+examples in [Installation](docs/installation.md). Release notes
 should cover all changes since the previous tag.
 
 Open a pull request from that branch. In addition to the normal build and test
 matrix, CI creates Debian, RPM, Arch, and AppImage packages on `release/*` pull
-requests. Download the `*-package` artifacts from the CI run and test the packages
-in a Plasma 6 Wayland session before merging. Check image loading, export, Apply,
-preview restoration, folder batches, library deletion, and slideshow rotation
-after closing the app.
+requests. These artifacts are available from the CI run for any additional
+package checks. Use the binary directly in a Plasma 6 Wayland session for normal
+application testing.
 
 After merging the release PR, tag its commit as `v<version>` and push the tag
 when ready to publish. The tag triggers the Release packages workflow, which
@@ -129,8 +114,8 @@ can also be run manually on a branch to build artifacts without publishing.
 
 A container does not need to use the same distribution as its host. The Arch
 definition can be used from Linux, macOS, or Windows hosts supported by the
-Dev Containers runtime. Keeping Arch is useful when the target is an Arch
-package or an Arch/KDE installation.
+Dev Containers runtime. Keeping Arch is useful when the target is an Arch/KDE
+installation.
 
 To reproduce a different deployment environment, add another Dockerfile under
 `.devcontainer/` (or replace the existing one), change the `build.dockerfile`
@@ -141,10 +126,9 @@ entry in `devcontainer.json`, and install that distribution's equivalents of:
 - Qt 6 Core, D-Bus, GUI, Widgets, Test, and Qml development files;
 - KDE Frameworks 6 ConfigWidgets and Extra CMake Modules.
 
-Keep the CMake build and test commands the same. Package creation is
-distribution-specific: `packaging/arch/build-package.sh` requires Arch's
-`makepkg`, while the CPack configuration and release workflow provide the
-starting points for Debian, RPM, and AppImage builds.
+Keep the CMake build and test commands the same. Release packages are assembled
+by the shared GitHub Actions workflow, using CPack for Debian/RPM and separate
+steps for Arch and AppImage.
 
 If the committed editor settings, user name, or other ergonomic choices do not
 suit your setup, adjust your local devcontainer copy or use a native build.

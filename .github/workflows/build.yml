@@ -72,7 +72,7 @@ jobs:
             test "${GITHUB_REF_NAME}" = "v${project_version}"
           fi
           if [[ '${{ matrix.target }}' == 'arch' ]]; then
-            package_version="$(sed -nE 's/^pkgver=(.*)$/\1/p' packaging/arch/PKGBUILD)"
+            package_version="$(sed -nE 's/^pkgver=(.*)$/\1/p' packaging/arch/metadata.sh)"
             test "${project_version}" = "${package_version}"
           fi
 
@@ -98,9 +98,7 @@ jobs:
         if: inputs.package && matrix.target == 'arch'
         run: |
           DESTDIR="${PWD}/build/pkgroot" cmake --install build --strip
-          # Share metadata with local makepkg builds, especially runtime plugins.
-          startdir="${PWD}/packaging/arch"
-          source packaging/arch/PKGBUILD
+          source packaging/arch/metadata.sh
           installed_size="$(du --summarize --bytes build/pkgroot | cut --fields=1)"
           printf '%s\n' \
             "pkgname = ${pkgname}" "pkgbase = ${pkgname}" \

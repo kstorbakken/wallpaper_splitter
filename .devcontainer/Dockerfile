@@ -14,7 +14,6 @@ RUN pacman --sync --refresh --sysupgrade --noconfirm \
         git \
         kconfigwidgets \
         less \
-        namcap \
         ninja \
         openssh \
         pkgconf \
