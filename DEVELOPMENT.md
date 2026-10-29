@@ -98,11 +98,32 @@ written to the ignored `packages/` directory:
 On an Arch Linux host, install or upgrade the printed artifact with:
 
 ```sh
-sudo pacman -U packages/wallpaper_splitter-1.4.1-1-x86_64.pkg.tar.zst
+sudo pacman -U packages/wallpaper_splitter-1.5.0-1-x86_64.pkg.tar.zst
 ```
 
 This local test-package workflow is separate from the packages created for
 tagged releases by GitHub Actions.
+
+## Preparing a release
+
+Create a `release/<version>` branch from `main`. Update the version in
+`CMakeLists.txt` and `packaging/arch/PKGBUILD`, reset `pkgrel` to `1`, add the
+AppStream release entry in `assets/metainfo.xml`, and update versioned package
+examples in this guide and [Installation](docs/installation.md). Release notes
+should cover all changes since the previous tag.
+
+Open a pull request from that branch. In addition to the normal build and test
+matrix, CI creates Debian, RPM, Arch, and AppImage packages on `release/*` pull
+requests. Download the `*-package` artifacts from the CI run and test the packages
+in a Plasma 6 Wayland session before merging. Check image loading, export, Apply,
+preview restoration, folder batches, library deletion, and slideshow rotation
+after closing the app.
+
+After merging the release PR, tag its commit as `v<version>` and push the tag
+when ready to publish. The tag triggers the Release packages workflow, which
+rebuilds the packages and publishes them to a GitHub release after validation.
+Release PR CI only uploads workflow artifacts. The Release packages workflow
+can also be run manually on a branch to build artifacts without publishing.
 
 ## Matching another environment
 

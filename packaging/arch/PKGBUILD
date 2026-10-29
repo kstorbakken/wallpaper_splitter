@@ -1,5 +1,5 @@
 pkgname=wallpaper_splitter
-pkgver=1.4.1
+pkgver=1.5.0
 pkgrel=1
 pkgdesc='Split and span a single wallpaper across multiple screens on KDE Plasma'
 arch=('x86_64')

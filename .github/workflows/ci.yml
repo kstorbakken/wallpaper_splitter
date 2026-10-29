@@ -12,6 +12,9 @@ permissions:
 jobs:
   linux-targets:
     uses: ./.github/workflows/build.yml
+    with:
+      # Release preparation PRs also produce installable artifacts for testing.
+      package: ${{ startsWith(github.head_ref, 'release/') }}
 
   # Keep the existing required check name for branch protection.
   build-and-test:
