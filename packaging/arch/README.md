@@ -1,14 +1,11 @@
-# Local Arch test package
+# Arch release package
 
-This directory contains the `makepkg` definition and helper used to build an
-installable Arch Linux package from the current working tree. It is intended
-for local integration testing, not as devcontainer configuration, and it
-includes uncommitted source changes.
+`metadata.sh` supplies the name, version, license, and runtime dependencies for
+the pacman archive assembled by the shared GitHub Actions build workflow.
 
-Run `./packaging/arch/build-package.sh` from anywhere in the checkout. The
-helper creates an isolated temporary build, runs the test suite, and writes the
-unsigned `.pkg.tar.zst` artifact to the ignored `packages/` directory.
+The workflow stages the installed application, writes `.PKGINFO` using this
+metadata, and creates the release `.pkg.tar.zst`. Keep `pkgver` aligned with
+`CMakeLists.txt` and reset `pkgrel` to `1` for a new release.
 
-The helper requires an Arch environment with the dependencies declared in
-`PKGBUILD`; the repository's devcontainer supplies them. Official tagged
-release packages are built separately by GitHub Actions.
+The [AUR package](https://aur.archlinux.org/packages/wallpaper_splitter) has a
+separate recipe maintained in its AUR repository.
