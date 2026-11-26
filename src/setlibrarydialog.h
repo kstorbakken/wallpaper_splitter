@@ -20,14 +20,17 @@ private:
     QPlainTextEdit *details;
     QCheckBox *selectAllCheckBox;
     QPushButton *applyButton;
+    QPushButton *lockScreenButton;
     QPushButton *exportButton;
     QPushButton *renameButton;
     QPushButton *deleteButton;
     void refresh(const QString &selectedId = {});
     void select();
     void updateBulkControls();
+    void applyLockScreen();
     QStringList checkedIds() const;
     QStringList actionIds() const;
+    const WallpaperSet *actionSet(const QStringList &ids) const;
     void report(const OperationResult &result);
 };
 #endif

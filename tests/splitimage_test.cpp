@@ -1,3 +1,5 @@
+#include <KConfig>
+#include <KConfigGroup>
 #include <QColor>
 #include <QComboBox>
 #include <QTimer>
@@ -18,10 +20,13 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QListWidget>
+#include <QMenu>
+#include <QMessageBox>
 #include <QJsonObject>
 #include <QJSEngine>
 #include <algorithm>
 #include <QSettings>
+#include <QScopeGuard>
 #include <QScrollBar>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -89,6 +94,7 @@ private slots:
     void batchFolderAndLayoutModes();
     void batchDialogUsesRememberedDefaults();
     void customLibrarySavesWithoutApplying();
+    void editorApplyMenuSavesAndAppliesToLockScreen();
     void previewRestoresAndCleansTemporaryFiles();
     void previewHandlesFailuresAndBlocksApply();
     void previewScriptsRestoreDesktopIdentityAndPlugin();
@@ -121,6 +127,7 @@ private slots:
     void commandLineExportsAndRejectsConflicts();
     void libraryReappliesAndPreservesMetadata();
     void libraryRejectsUnsafeDeletion();
+    void libraryAppliesLockScreenAcrossDisplays();
     void libraryHandlesBrokenSets();
     void libraryDialogShowsSets();
     void physicalLayoutCompensatesForPixelDensity();
@@ -233,6 +240,106 @@ void SplitImageTest::customLibrarySavesWithoutApplying() {
     QVERIFY(result.paths[0].endsWith(".png"));
     QVERIFY(result.paths[0].startsWith(preferences.libraryDirectory + '/'));
     QVERIFY(SetLibrary(folder.filePath("other-library")).sets().isEmpty());
+}
+
+void SplitImageTest::editorApplyMenuSavesAndAppliesToLockScreen() {
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const auto configHome = qgetenv("XDG_CONFIG_HOME");
+    const auto dataHome = qgetenv("XDG_DATA_HOME");
+    const auto restoreEnvironment = qScopeGuard([&] {
+        if (configHome.isNull()) qunsetenv("XDG_CONFIG_HOME");
+        else qputenv("XDG_CONFIG_HOME", configHome);
+        if (dataHome.isNull()) qunsetenv("XDG_DATA_HOME");
+        else qputenv("XDG_DATA_HOME", dataHome);
+    });
+    QVERIFY(qputenv("XDG_CONFIG_HOME", QFile::encodeName(folder.path())));
+    QVERIFY(qputenv("XDG_DATA_HOME", QFile::encodeName(folder.filePath("data"))));
+
+    const auto previous = AppSettings::load();
+    const auto restore = qScopeGuard([&] { AppSettings::save(previous); });
+    auto preferences = previous;
+    preferences.libraryDirectory = folder.filePath("sets");
+    preferences.closeAfterApply = true;
+    preferences.outputFormat = OutputFormat::Png;
+    AppSettings::save(preferences);
+
+    WallpaperSplitter splitter;
+    splitter.show();
+    auto *apply = splitter.findChild<QPushButton *>("applyButton");
+    QVERIFY(apply && apply->menu());
+    QVERIFY(!apply->isEnabled());
+    QImage image(320, 200, QImage::Format_RGB32);
+    image.fill(Qt::cyan);
+    splitter.addImage(image);
+    QVERIFY(apply->isEnabled());
+    auto *menu = apply->menu();
+    const auto actions = menu->actions();
+    QCOMPARE(actions.size(), 3);
+    QCOMPARE(actions.at(0)->text(), "Apply to Desktop");
+    QCOMPARE(actions.at(1)->text(), "Apply to Lock Screen");
+    QCOMPARE(actions.at(2)->text(), "Save to Library");
+
+    QSignalSpy menuOpened(menu, &QMenu::aboutToShow);
+    QTimer::singleShot(0, menu, &QMenu::hide);
+    QTest::mouseClick(apply, Qt::LeftButton, Qt::NoModifier, QPoint(5, apply->height() / 2));
+    QTRY_COMPARE(menuOpened.size(), 1);
+    QTRY_VERIFY(!menu->isVisible());
+    QTimer::singleShot(0, menu, &QMenu::hide);
+    QTest::keyClick(&splitter, Qt::Key_Return);
+    QTRY_COMPARE(menuOpened.size(), 2);
+    QTRY_VERIFY(!menu->isVisible());
+    SetLibrary library(preferences.libraryDirectory);
+    QVERIFY(library.sets().isEmpty());
+
+    QString confirmation;
+    QTimer::singleShot(0, &splitter, [&] {
+        if (auto *message = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+            confirmation = message->windowTitle();
+            message->accept();
+        }
+    });
+    actions.at(2)->trigger();
+
+    QCOMPARE(confirmation, "Saved to Library");
+    QVERIFY(splitter.isVisible());
+    const auto sets = library.sets();
+    QCOMPARE(sets.size(), 1);
+    const auto &set = sets.first();
+    QCOMPARE(set.manifest.value("status").toString(), "prepared");
+    QVERIFY(!set.manifest.contains("lastAppliedAt"));
+    const QImage crop(set.paths.first());
+    QCOMPARE(crop.size(), set.screens.first().cropRect.size());
+    QCOMPARE(crop.pixelColor(crop.rect().center()), QColor(Qt::cyan));
+
+    image.fill(Qt::blue);
+    splitter.addImage(image);
+    QString lockError;
+    QTimer dismissError;
+    dismissError.setSingleShot(true);
+    connect(&dismissError, &QTimer::timeout, &splitter, [&] {
+        if (auto *message = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+            lockError = message->text();
+            message->accept();
+        }
+    });
+    dismissError.start(0);
+    actions.at(1)->trigger();
+    QVERIFY2(splitter.result() == QDialog::Accepted, qPrintable(lockError));
+    QCOMPARE(library.sets().size(), 2);
+
+    const KConfig config("kscreenlockerrc", KConfig::NoGlobals);
+    const auto greeter = config.group("Greeter");
+    const auto plugin = greeter.readEntry("WallpaperPlugin", QString());
+    QCOMPARE(plugin, "io.github.kstorbakken.wallpaper_splitter.lockscreen");
+    const auto wallpaper = greeter.group("Wallpaper").group(plugin).group("General");
+    const auto crops = QJsonDocument::fromJson(wallpaper.readEntry("ScreenCrops", QString()).toUtf8()).array();
+    QCOMPARE(crops.size(), QGuiApplication::screens().size());
+    for (const auto &entry : crops) {
+        const QImage lockCrop(QUrl(entry.toObject().value("url").toString()).toLocalFile());
+        QVERIFY(!lockCrop.isNull());
+        QCOMPARE(lockCrop.pixelColor(lockCrop.rect().center()), QColor(Qt::blue));
+    }
 }
 
 void SplitImageTest::previewRestoresAndCleansTemporaryFiles() {
@@ -657,10 +764,10 @@ void SplitImageTest::footerControlsStayGroupedWhenWindowWidens() {
 
     auto *openBox = splitter.findChild<QDialogButtonBox *>(QStringLiteral("buttonBoxOpen"));
     auto *settings = splitter.findChild<QPushButton *>(QStringLiteral("settingsButton"));
-    auto *actions = splitter.findChild<QDialogButtonBox *>(QStringLiteral("buttonBox"));
+    auto *apply = splitter.findChild<QPushButton *>(QStringLiteral("applyButton"));
     QVERIFY(openBox != nullptr);
     QVERIFY(settings != nullptr);
-    QVERIFY(actions != nullptr);
+    QVERIFY(apply != nullptr);
 
     const auto *openButton = openBox->button(QDialogButtonBox::Open);
     QVERIFY(openButton != nullptr);
@@ -673,14 +780,14 @@ void SplitImageTest::footerControlsStayGroupedWhenWindowWidens() {
     QVERIFY(library->geometry().left() - openBox->geometry().right() <= 12);
     QVERIFY(settings->geometry().left() - library->geometry().right() <= 12);
     QVERIFY(openBox->geometry().top() > view->geometry().bottom());
-    QVERIFY(actions->geometry().top() > view->geometry().bottom());
-    QVERIFY(exportButton->geometry().right() < actions->geometry().left());
-    QVERIFY(actions->geometry().left() - exportButton->geometry().right() <= 12);
+    QVERIFY(apply->geometry().top() > view->geometry().bottom());
+    QVERIFY(exportButton->geometry().right() < apply->geometry().left());
+    QVERIFY(apply->geometry().left() - exportButton->geometry().right() <= 12);
     QVERIFY(settings->menu() != nullptr);
-    QVERIFY(actions->button(QDialogButtonBox::Cancel) == nullptr);
-    QVERIFY(actions->button(QDialogButtonBox::Ok)->isDefault());
+    QVERIFY(apply->menu() != nullptr);
+    QVERIFY(apply->isDefault());
     QVERIFY(openButton->geometry().left() <= 1);
-    QVERIFY(splitter.width() - actions->geometry().right() <= 20);
+    QVERIFY(splitter.width() - apply->geometry().right() <= 20);
 }
 
 void SplitImageTest::monitorLabelRemainsCenteredAtDifferentZoomLevels() {
@@ -968,12 +1075,23 @@ void SplitImageTest::reusesIdenticalManagedSet() {
 
     FakePlasmaApplicator applicator(true);
     const OperationResult first = OutputService::applyManaged(
-            source, source.size(), screens, QStringLiteral("forest.png"),
-            QStringLiteral("/pictures/forest.png"), applicator, managedRoot.path());
+            source, source.size(), screens, QStringLiteral("forest.jpg"),
+            QStringLiteral("/pictures/forest.jpg"), applicator, managedRoot.path());
     QVERIFY2(first.success, qPrintable(first.message));
+    QFile originalCrop(first.paths.first());
+    QVERIFY(originalCrop.open(QIODevice::ReadOnly));
+    const QByteArray originalBytes = originalCrop.readAll();
+    originalCrop.close();
+    const auto saved = OutputService::saveManaged(source, source.size(), screens, "forest.jpg", {},
+                                                 managedRoot.path(), OutputFormat::Jpeg, 1);
+    QVERIFY2(saved.success, qPrintable(saved.message));
+    QCOMPARE(saved.paths, first.paths);
+    QVERIFY(originalCrop.open(QIODevice::ReadOnly));
+    QCOMPARE(originalCrop.readAll(), originalBytes);
+    originalCrop.close();
     const OperationResult repeated = OutputService::applyManaged(
-            source, source.size(), screens, QStringLiteral("forest.png"),
-            QStringLiteral("/pictures/forest.png"), applicator, managedRoot.path());
+            source, source.size(), screens, QStringLiteral("forest.jpg"),
+            QStringLiteral("/pictures/forest.jpg"), applicator, managedRoot.path());
     QVERIFY2(repeated.success, qPrintable(repeated.message));
 
     QCOMPARE(repeated.manifestPath, first.manifestPath);
@@ -1228,6 +1346,69 @@ void SplitImageTest::libraryRejectsUnsafeDeletion() {
     QVERIFY(extra.remove());
     QVERIFY(library.remove(set.id, plasma).success);
     QVERIFY(!QFileInfo::exists(set.directory));
+}
+
+void SplitImageTest::libraryAppliesLockScreenAcrossDisplays() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto configHome = qgetenv("XDG_CONFIG_HOME");
+    const auto dataHome = qgetenv("XDG_DATA_HOME");
+    const auto restore = qScopeGuard([&] {
+        if (configHome.isNull()) qunsetenv("XDG_CONFIG_HOME");
+        else qputenv("XDG_CONFIG_HOME", configHome);
+        if (dataHome.isNull()) qunsetenv("XDG_DATA_HOME");
+        else qputenv("XDG_DATA_HOME", dataHome);
+    });
+    QVERIFY(qputenv("XDG_CONFIG_HOME", QFile::encodeName(directory.path())));
+    QVERIFY(qputenv("XDG_DATA_HOME", QFile::encodeName(directory.filePath("data"))));
+
+    KConfig initial("kscreenlockerrc", KConfig::NoGlobals);
+    initial.group("Daemon").writeEntry("Timeout", 12);
+    initial.group("Greeter").writeEntry("WallpaperPlugin", "org.kde.color");
+    QVERIFY(initial.sync());
+
+    const QString root = directory.filePath("Library #1");
+    QImage image(20, 10, QImage::Format_RGB32);
+    image.fill(Qt::blue);
+    const QList<ScreenCrop> screens{{"DP-1", 1, QRect(0, 0, 10, 10), QRect(0, 0, 10, 10)},
+                                   {"DP-2", 2, QRect(10, 0, 10, 10), QRect(10, 0, 10, 10)}};
+    const auto saved = OutputService::saveManaged(image, image.size(), screens, "blue.png", {}, root);
+    QVERIFY2(saved.success, qPrintable(saved.message));
+    SetLibrary library(root);
+    const auto set = library.sets().first();
+    const QList<MonitorInfo> monitors{{"right", "HDMI-1", screens.at(1).desktopGeometry, {}, {}},
+                                      {"left", "DP-1", screens.at(0).desktopGeometry, {}, {}}};
+    QCOMPARE(library.applyLockScreen(set.id, {monitors.first()}).error, OperationError::ImageLayout);
+    const QString pluginId = "io.github.kstorbakken.wallpaper_splitter.lockscreen";
+    const QDir package(directory.filePath("data/plasma/wallpapers/" + pluginId));
+    QVERIFY(!package.exists());
+    const auto applied = library.applyLockScreen(set.id, monitors);
+    QVERIFY2(applied.success, qPrintable(applied.message));
+    QCOMPARE(applied.paths, saved.paths);
+    for (const auto &file : {"metadata.json", "contents/config/main.xml", "contents/ui/main.qml"})
+        QVERIFY(package.exists(file));
+
+    KConfig config("kscreenlockerrc", KConfig::NoGlobals);
+    QCOMPARE(config.group("Daemon").readEntry("Timeout", 0), 12);
+    auto greeter = config.group("Greeter");
+    QCOMPARE(greeter.readEntry("WallpaperPlugin", QString()), pluginId);
+    auto wallpaper = greeter.group("Wallpaper").group(pluginId).group("General");
+    const auto crops = QJsonDocument::fromJson(wallpaper.readEntry("ScreenCrops", QString()).toUtf8()).array();
+    QCOMPARE(crops.size(), 2);
+    QCOMPARE(crops.at(0).toObject().value("name").toString(), "DP-1");
+    QCOMPARE(crops.at(1).toObject().value("name").toString(), "HDMI-1");
+    QCOMPARE(crops.at(0).toObject().value("x").toInt(), 0);
+    QCOMPARE(crops.at(1).toObject().value("x").toInt(), 10);
+    for (int i = 0; i < crops.size(); ++i)
+        QCOMPARE(QUrl(crops.at(i).toObject().value("url").toString()).toLocalFile(), saved.paths.at(i));
+    QCOMPARE(library.sets().first().manifest, set.manifest);
+
+    FakePlasmaApplicator plasma(true);
+    plasma.references = OperationResult::ok();
+    QVERIFY(!library.remove(set.id, plasma).success);
+    greeter.writeEntry("WallpaperPlugin", "org.kde.color");
+    QVERIFY(config.sync());
+    QVERIFY(library.remove(set.id, plasma).success);
 }
 
 void SplitImageTest::libraryHandlesBrokenSets() {

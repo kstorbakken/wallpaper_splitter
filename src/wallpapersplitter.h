@@ -47,6 +47,7 @@ private:
     void displayImage(const QImage &image);
     QList<ScreenCrop> currentScreenCrops() const;
     QString sourceName() const;
+    OperationResult saveCurrentSet(const QString &root = {}) const;
     void refreshMonitors();
     void showOperationError(const OperationResult &result);
 
@@ -54,7 +55,9 @@ private slots:
     void selectImage();
     void splitFolder();
     void previewWallpaper();
-    void applyWallpaper();
+    void applyDesktopWallpaper();
+    void applyLockScreenWallpaper();
+    void saveToLibrary();
     void exportWallpapers();
     void showSettings();
 

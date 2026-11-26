@@ -21,6 +21,7 @@
 
 #include "graphicsview.h"
 #include "resizableimageitem.h"
+#include "setlibrary.h"
 #include "settingsdialog.h"
 #include "setlibrarydialog.h"
 #include "monitorsdialog.h"
@@ -51,7 +52,7 @@ WallpaperSplitter::WallpaperSplitter(QWidget *parent)
     auto *folderAction = openMenu->addAction(tr("Split folder…"), this, &WallpaperSplitter::splitFolder);
     folderAction->setObjectName(QStringLiteral("splitFolderAction"));
     openButton->setMenu(openMenu);
-    auto *applyButton = ui->buttonBox->button(QDialogButtonBox::Ok);
+    auto *applyButton = ui->applyButton;
     auto *exportButton = ui->exportButton;
     previewButton = new QPushButton(tr("Preview"), this);
     previewButton->setObjectName(QStringLiteral("previewButton"));
@@ -60,19 +61,22 @@ WallpaperSplitter::WallpaperSplitter(QWidget *parent)
     previewButton->setToolTip(tr("Temporarily try this wallpaper, then restore the previous one."));
     ui->footerLayout->insertWidget(ui->footerLayout->count() - 2, previewButton);
     connect(previewButton, &QPushButton::clicked, this, &WallpaperSplitter::previewWallpaper);
-    applyButton->setText(tr("Apply"));
+    applyButton->setIcon(style()->standardIcon(QStyle::SP_DialogApplyButton));
+    auto *applyMenu = new QMenu(applyButton);
+    applyMenu->addAction(tr("Apply to Desktop"), this, &WallpaperSplitter::applyDesktopWallpaper);
+    applyMenu->addAction(tr("Apply to Lock Screen"), this, &WallpaperSplitter::applyLockScreenWallpaper);
+    applyMenu->addAction(tr("Save to Library"), this, &WallpaperSplitter::saveToLibrary);
+    applyButton->setMenu(applyMenu);
     exportButton->setText(tr("Export"));
     exportButton->setIcon(QIcon::fromTheme(QStringLiteral("document-save-as"),
                                          style()->standardIcon(QStyle::SP_DialogSaveButton)));
     exportButton->setObjectName(QStringLiteral("exportButton"));
     exportButton->setAutoDefault(false);
-    applyButton->setDefault(true);
     applyButton->setEnabled(false);
     exportButton->setEnabled(false);
 
     connect(ui->buttonBoxOpen, &QDialogButtonBox::accepted,
             this, &WallpaperSplitter::selectImage);
-    connect(applyButton, &QPushButton::pressed, this, &WallpaperSplitter::applyWallpaper);
     connect(exportButton, &QPushButton::pressed, this, &WallpaperSplitter::exportWallpapers);
     connect(graphicsView->stretchButton(), &QToolButton::clicked, this, [this] {
         toggleLayoutMode(LayoutMode::Stretch);
@@ -117,7 +121,6 @@ WallpaperSplitter::WallpaperSplitter(QWidget *parent)
         button->setDefault(false);
     }
     applyButton->setDefault(true);
-
 }
 
 WallpaperSplitter::~WallpaperSplitter() {
@@ -138,7 +141,7 @@ void WallpaperSplitter::displayImage(const QImage &image) {
     screenGroup = nullptr;
     layoutMode = LayoutMode::Original;
     refreshMonitors();
-    ui->buttonBox->button(QDialogButtonBox::Ok)->setEnabled(true);
+    ui->applyButton->setEnabled(true);
     ui->exportButton->setEnabled(true);
     previewButton->setEnabled(true);
     auto *view = static_cast<GraphicsView *>(ui->graphicsView);
@@ -230,7 +233,8 @@ void WallpaperSplitter::exportWallpapers() {
     AppSettings::save(preferences);
 }
 
-void WallpaperSplitter::applyWallpaper() {
+void WallpaperSplitter::applyDesktopWallpaper() {
+    if (!imageItem) return;
     DBusPlasmaApplicator applicator;
     const OperationResult result = OutputService::applyManaged(
             imageItem->image(), originalImageSize, currentScreenCrops(), sourceName(),
@@ -240,6 +244,46 @@ void WallpaperSplitter::applyWallpaper() {
         return;
     }
     if (preferences.closeAfterApply) accept();
+}
+
+void WallpaperSplitter::applyLockScreenWallpaper() {
+    const QString root = OutputService::defaultManagedRoot();
+    const auto saved = saveCurrentSet(root);
+    if (!saved.success) {
+        showOperationError(saved);
+        return;
+    }
+
+    const QString id = QFileInfo(saved.manifestPath).dir().dirName();
+    const auto result = SetLibrary(root).applyLockScreen(id, MonitorLayout::connectedMonitors());
+    if (!result.success) {
+        QMessageBox::critical(this, tr("Could not apply to lock screen"),
+            tr("The set was saved to the Library. %1").arg(result.message));
+        return;
+    }
+    if (preferences.closeAfterApply) {
+        accept();
+        return;
+    }
+    QMessageBox::information(this, tr("Lock Screen Wallpaper Applied"),
+        tr("This set will span your displays the next time you lock your screen."));
+}
+
+OperationResult WallpaperSplitter::saveCurrentSet(const QString &root) const {
+    const QImage image = imageItem ? imageItem->image() : QImage();
+    return OutputService::saveManaged(image, originalImageSize, currentScreenCrops(),
+        sourceName(), imageFile.isFile() ? imageFile.absoluteFilePath() : QString(), root,
+        preferences.outputFormat, preferences.jpegQuality);
+}
+
+void WallpaperSplitter::saveToLibrary() {
+    const auto result = saveCurrentSet();
+    if (!result.success) {
+        showOperationError(result);
+        return;
+    }
+    QMessageBox::information(this, tr("Saved to Library"),
+                             tr("The current crops are available in the Library."));
 }
 
 void WallpaperSplitter::showSettings() {

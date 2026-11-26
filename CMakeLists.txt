@@ -52,6 +52,14 @@ target_link_libraries(wallpaper_splitter_core PUBLIC
         KF6::ConfigWidgets
         KF6::ConfigCore
 )
+qt_add_resources(wallpaper_splitter_core lockscreen_wallpaper
+        PREFIX "/lockscreen-wallpaper"
+        BASE assets/lockscreen-wallpaper
+        FILES
+        assets/lockscreen-wallpaper/contents/config/main.xml
+        assets/lockscreen-wallpaper/contents/ui/main.qml
+        assets/lockscreen-wallpaper/metadata.json
+)
 
 qt_add_executable(wallpaper_splitter src/main.cpp)
 target_link_libraries(wallpaper_splitter PRIVATE wallpaper_splitter_core)

@@ -4,6 +4,8 @@
 #include "outputservice.h"
 #include <QJsonObject>
 
+struct MonitorInfo;
+
 struct WallpaperSet {
     QString id;
     QString name;
@@ -24,6 +26,7 @@ public:
     // touching Plasma, so a slideshow can safely skip only the former.
     OperationResult reapply(const QString &id, const QList<QRect> &layout,
                             PlasmaApplicator &applicator, bool *applicationAttempted = nullptr) const;
+    OperationResult applyLockScreen(const QString &id, const QList<MonitorInfo> &monitors) const;
     OperationResult exportSet(const QString &id, const ExportOptions &options) const;
     OperationResult remove(const QString &id, PlasmaApplicator &applicator) const;
     static QImage preview(const WallpaperSet &set, const QSize &size);

@@ -505,11 +505,15 @@ OperationResult OutputService::writeManaged(const QImage &image, const QSize &or
                 format = encodedFormat(candidatePath);
             }
         }
-        if (relative.isEmpty()) relative = QStringLiteral("screen-%1-%2.%3")
+        const bool existingCrop = !relative.isEmpty();
+        if (!existingCrop) relative = QStringLiteral("screen-%1-%2.%3")
                 .arg(artifact.screen.number).arg(artifact.digest, extension(format));
         const QString path = QDir(setDirectory).filePath(relative);
-        result = writeImage(artifact.image, path, format, jpegQuality);
-        if (!result.success) return OperationResult::failure(result.error, result.message, paths);
+        // A save-only operation can find crops that Plasma is already displaying.
+        if (applicator || !existingCrop || QImage(path).size() != artifact.image.size()) {
+            result = writeImage(artifact.image, path, format, jpegQuality);
+            if (!result.success) return OperationResult::failure(result.error, result.message, paths);
+        }
         relativePaths.append(relative);
         paths.append(path);
     }

@@ -1,4 +1,6 @@
 #include "setlibrarydialog.h"
+
+#include "monitorlayout.h"
 #include "appsettings.h"
 #include "slideshowdialog.h"
 #include <QCheckBox>
@@ -64,6 +66,10 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     applyButton = buttons->addButton(tr("Reapply"), QDialogButtonBox::ActionRole);
     applyButton->setObjectName("reapplySet");
+    lockScreenButton = buttons->addButton(tr("Set as Lock Screen"), QDialogButtonBox::ActionRole);
+    lockScreenButton->setObjectName("applyLockScreen");
+    lockScreenButton->setToolTip(tr("Apply this set across all connected lock screen displays."));
+    lockScreenButton->setAutoDefault(false);
     renameButton = buttons->addButton(tr("Rename"), QDialogButtonBox::ActionRole);
     renameButton->setObjectName("renameSet");
     renameButton->setIcon(QIcon::fromTheme(QStringLiteral("edit-rename"),
@@ -135,14 +141,11 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
         report(result);
         if (result.success) status->setText(tr("Set applied to the current Plasma activity."));
     });
+    connect(lockScreenButton, &QPushButton::clicked, this, &SetLibraryDialog::applyLockScreen);
     connect(renameButton, &QPushButton::clicked, this, [this] {
-        const QStringList ids = actionIds();
-        if (ids.size() != 1) return;
-        const auto found = std::find_if(entries.cbegin(), entries.cend(), [&ids](const auto &set) {
-            return set.id == ids.first();
-        });
-        if (found == entries.cend()) return;
-        const auto set = *found;
+        const auto *selected = actionSet(actionIds());
+        if (!selected) return;
+        const auto set = *selected;
         bool accepted = false;
         const QString name = QInputDialog::getText(this, tr("Rename set"), tr("Name:"),
                                                    QLineEdit::Normal, set.name, &accepted);
@@ -218,7 +221,7 @@ void SetLibraryDialog::refresh(const QString &selectedId) {
         if (set.id == currentId) row = i;
     }
     status->setText(entries.isEmpty()
-        ? tr("No wallpaper sets yet. Open an image and choose Apply to add your first set.")
+        ? tr("No wallpaper sets yet. Open an image and choose Save to Library or Apply.")
         : tr("%n saved set(s). Reapply uses the current Plasma activity.", nullptr, entries.size()));
     if (!entries.isEmpty()) list->setCurrentRow(row);
     select();
@@ -270,6 +273,22 @@ QStringList SetLibraryDialog::actionIds() const {
     return ids;
 }
 
+const WallpaperSet *SetLibraryDialog::actionSet(const QStringList &ids) const {
+    if (ids.size() != 1) return nullptr;
+    const auto found = std::find_if(entries.cbegin(), entries.cend(), [&ids](const auto &set) {
+        return set.id == ids.first();
+    });
+    return found == entries.cend() ? nullptr : &*found;
+}
+
+void SetLibraryDialog::applyLockScreen() {
+    const auto *selected = actionSet(actionIds());
+    if (!selected || !selected->problem.isEmpty()) return;
+    const auto result = library.applyLockScreen(selected->id, MonitorLayout::connectedMonitors());
+    report(result);
+    if (result.success) status->setText(tr("This set will span your displays the next time you lock your screen."));
+}
+
 void SetLibraryDialog::updateBulkControls() {
     const int checked = checkedIds().size();
     const QStringList ids = actionIds();
@@ -278,15 +297,12 @@ void SetLibraryDialog::updateBulkControls() {
     selectAllCheckBox->setCheckState(checked == 0 ? Qt::Unchecked
                                      : checked == list->count() ? Qt::Checked
                                      : Qt::PartiallyChecked);
-    const bool single = ids.size() == 1;
-    const auto found = single
-        ? std::find_if(entries.cbegin(), entries.cend(), [&ids](const auto &set) {
-              return set.id == ids.first();
-          })
-        : entries.cend();
-    applyButton->setEnabled(single && found != entries.cend() && found->problem.isEmpty());
-    exportButton->setEnabled(single && found != entries.cend() && found->problem.isEmpty());
-    renameButton->setEnabled(single);
+    const auto *set = actionSet(ids);
+    const bool usable = set && set->problem.isEmpty();
+    applyButton->setEnabled(usable);
+    lockScreenButton->setEnabled(usable);
+    exportButton->setEnabled(usable);
+    renameButton->setEnabled(set != nullptr);
     deleteButton->setEnabled(!ids.isEmpty());
     deleteButton->setText(checked > 0
         ? tr("Delete selected (%1)").arg(checked)

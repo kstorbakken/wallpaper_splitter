@@ -44,8 +44,8 @@ AppImage setup, and updates. To build from source, use the
    it manually; hold **Shift** to preserve its aspect ratio.
 3. Click **Preview** to try it on the desktop. The previous wallpaper returns
    when the countdown ends or you click **End Preview**.
-4. Click **Apply** to save a library set and use it on the current Plasma activity,
-   or **Export** to save crop files in a folder you choose.
+4. Open **Apply** and choose **Apply to Desktop**, **Apply to Lock Screen**, or
+   **Save to Library**. Click **Export** to save crop files in a folder you choose.
 
 Open **Library → Slideshow…** to rotate saved sets automatically. For displays with
 different pixel densities or physical gaps, start with **Settings → Monitors**.
