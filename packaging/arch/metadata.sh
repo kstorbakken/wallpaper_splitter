@@ -1,6 +1,6 @@
 # Metadata for the pacman archive assembled by the shared release workflow.
 pkgname=wallpaper_splitter
-pkgver=1.5.0
+pkgver=1.6.0
 pkgrel=1
 pkgdesc='Split and span a single wallpaper across multiple screens on KDE Plasma'
 arch=('x86_64')

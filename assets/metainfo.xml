@@ -56,6 +56,23 @@
     </screenshots>
     
     <releases>
+        <release version="1.6.0" date="2026-11-26">
+            <url type="details">https://github.com/kstorbakken/wallpaper_splitter/releases/tag/v1.6.0</url>
+            <description>
+                <p>
+                    Span wallpapers across every display on the Plasma lock screen and rotate
+                    them alongside the desktop slideshow.
+                </p>
+                <ul>
+                    <li>Use the editor's Apply menu to apply the current crop to the desktop or lock screen, or save it to the library for later.</li>
+                    <li>Keep the lock screen in sync with the desktop slideshow or choose a separate playlist. Slides crossfade while the lock screen is visible, and rotation leaves sleeping displays asleep.</li>
+                    <li>Sort the library and slideshow playlists using the Name and Date Added headers. Fine-tune slideshow playback with Move up and Move down.</li>
+                    <li>Read longer library filenames below the thumbnails, where they wrap to fit the pane.</li>
+                </ul>
+                <p>The shared release workflow now assembles an installable Arch package and checks its metadata with pacman.</p>
+            </description>
+        </release>
+
         <release version="1.5.0" date="2026-10-29">
             <url type="details">https://github.com/kstorbakken/wallpaper_splitter/releases/tag/v1.5.0</url>
             <description>

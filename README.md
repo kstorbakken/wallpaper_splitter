@@ -13,9 +13,11 @@ crops, and applies them together. You can also export the crops for your own use
 ## What you can do
 
 - Fit a continuous panorama, stretch to fill, or adjust the image by hand.
+- Span a wallpaper across your monitors on the desktop or the lock screen.
 - Align displays with different pixel densities, heights, and bezel gaps.
 - Preview on the desktop with automatic restoration of your previous wallpaper.
-- Save wallpaper sets in a library and rotate them while the app is closed.
+- Save wallpaper sets in a library and rotate them on the desktop and lock screen
+  while the app is closed.
 - Split a folder of images, or export and apply from the command line.
 
 Supports still images, including JPEG, PNG, and WebP.
