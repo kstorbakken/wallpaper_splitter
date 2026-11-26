@@ -7,7 +7,7 @@ Wallpaper Splitter fits an image to your screen layout, cuts it into per-monitor
 crops, and applies them together. You can also export the crops for your own use.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="Wallpaper Splitter editor showing one landscape across three monitor outlines, with Open, Library, Settings, Preview, Export, and Apply controls." width="900">
+  <img src="assets/screenshot.png" alt="Wallpaper Splitter editor showing a rocky coastline across three monitor outlines, with the Apply dropdown in the footer." width="601">
 </p>
 
 ## What you can do

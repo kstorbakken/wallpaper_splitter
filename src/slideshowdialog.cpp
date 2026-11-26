@@ -1,19 +1,34 @@
 #include "slideshowdialog.h"
+#include "wallpapersetlist.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QFormLayout>
-#include <QGuiApplication>
+#include <QHeaderView>
 #include <QLabel>
-#include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QScreen>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QTabWidget>
 #include <QVBoxLayout>
-#include <algorithm>
+
+namespace {
+QStringList checkedPlaybackOrder(const WallpaperSetList *list, const QStringList &previous) {
+    const auto checked = list->setIds(true);
+    QSet<QString> remaining(checked.cbegin(), checked.cend());
+    QStringList ordered;
+    for (const auto &id : previous)
+        if (remaining.remove(id)) ordered.append(id);
+    for (const auto &id : checked)
+        if (remaining.contains(id)) ordered.append(id);
+    return ordered;
+}
+}
 
 SlideshowDialog::SlideshowDialog(QWidget *parent, const QString &managedRoot,
                                  const QString &configFile, SlideshowScheduler *customScheduler)
@@ -23,28 +38,64 @@ SlideshowDialog::SlideshowDialog(QWidget *parent, const QString &managedRoot,
     resize(620, 620);
     auto *layout = new QVBoxLayout(this);
     auto *description = new QLabel(tr("Choose saved sets to rotate across all monitors. "
-        "Drag sets to change their order. Rotation continues while this app is closed and "
-        "uses the active Plasma activity at each switch. Missing sets and sets that do not "
-        "match your monitors are skipped."), this);
+        "Automatic rotation continues while this app is closed. Desktop changes apply to the "
+        "active Plasma activity. Missing sets and sets that do not match your monitors are skipped."), this);
     description->setWordWrap(true);
     layout->addWidget(description);
-    list = new QListWidget(this);
-    list->setObjectName("slideshowSets");
-    list->setDragDropMode(QAbstractItemView::InternalMove);
-    list->setDefaultDropAction(Qt::MoveAction);
-    list->setIconSize(QSize(90, 50));
-    layout->addWidget(list, 1);
-    auto *selection = new QHBoxLayout;
-    auto *all = new QPushButton(tr("Select all"), this);
-    auto *none = new QPushButton(tr("Clear selection"), this);
-    auto *up = new QPushButton(tr("Move up"), this);
-    auto *down = new QPushButton(tr("Move down"), this);
-    selection->addWidget(all);
-    selection->addWidget(none);
-    selection->addStretch();
-    selection->addWidget(up);
-    selection->addWidget(down);
-    layout->addLayout(selection);
+
+    auto *destination = new QFormLayout;
+    lockScreenMode = new QComboBox(this);
+    lockScreenMode->setObjectName("slideshowLockScreenMode");
+    lockScreenMode->addItem(tr("Off"), static_cast<int>(LockScreenRotation::Off));
+    lockScreenMode->addItem(tr("Match desktop"), static_cast<int>(LockScreenRotation::MatchDesktop));
+    lockScreenMode->addItem(tr("Separate playlist"), static_cast<int>(LockScreenRotation::SeparatePlaylist));
+    destination->addRow(tr("Lock screen:"), lockScreenMode);
+    layout->addLayout(destination);
+
+    auto *playlists = new QTabWidget(this);
+    playlists->setObjectName("slideshowPlaylists");
+    layout->addWidget(playlists, 1);
+    const auto markDirty = [this] {
+        dirty = true;
+        nextButton->setEnabled(false);
+    };
+    const auto addPlaylist = [this, playlists](const QString &title, const QString &name) {
+        auto *page = new QWidget(playlists);
+        auto *pageLayout = new QVBoxLayout(page);
+        auto *items = new WallpaperSetList(page);
+        items->setObjectName(name);
+        items->setDragDropMode(QAbstractItemView::InternalMove);
+        items->setDefaultDropAction(Qt::MoveAction);
+        items->setIconSize(QSize(90, 50));
+        pageLayout->addWidget(items);
+
+        auto *controls = new QHBoxLayout;
+        auto *all = new QPushButton(tr("Select all"), page);
+        auto *none = new QPushButton(tr("Clear selection"), page);
+        auto *up = new QPushButton(tr("Move up"), page);
+        auto *down = new QPushButton(tr("Move down"), page);
+        up->setObjectName("moveSetUp");
+        down->setObjectName("moveSetDown");
+        controls->addWidget(all);
+        controls->addWidget(none);
+        controls->addStretch();
+        controls->addWidget(up);
+        controls->addWidget(down);
+        pageLayout->addLayout(controls);
+        playlists->addTab(page, title);
+
+        const auto select = [items](Qt::CheckState state) {
+            for (int i = 0; i < items->topLevelItemCount(); ++i)
+                items->topLevelItem(i)->setCheckState(WallpaperSetList::Name, state);
+        };
+        connect(all, &QPushButton::clicked, this, [select] { select(Qt::Checked); });
+        connect(none, &QPushButton::clicked, this, [select] { select(Qt::Unchecked); });
+        connect(up, &QPushButton::clicked, this, [items] { items->moveCurrent(-1); });
+        connect(down, &QPushButton::clicked, this, [items] { items->moveCurrent(1); });
+        return items;
+    };
+    list = addPlaylist(tr("Desktop"), "slideshowSets");
+    lockScreenList = addPlaylist(tr("Lock Screen"), "slideshowLockScreenSets");
     auto *form = new QFormLayout;
     interval = new QSpinBox(this);
     interval->setObjectName("slideshowInterval");
@@ -71,20 +122,45 @@ SlideshowDialog::SlideshowDialog(QWidget *parent, const QString &managedRoot,
 
     SlideshowSettings settings;
     const auto loaded = slideshow.load(&settings);
-    auto sets = SetLibrary(managedRoot).sets();
-    QStringList order = settings.setIds;
-    for (const auto &set : sets) if (!order.contains(set.id)) order.append(set.id);
-    for (const auto &id : order) {
-        const auto found = std::find_if(sets.cbegin(), sets.cend(), [&id](const auto &set) { return set.id == id; });
-        if (found == sets.cend()) continue;
-        auto *item = new QListWidgetItem(found->name, list);
-        item->setData(Qt::UserRole, id);
-        item->setFlags((item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled)
-                       & ~Qt::ItemIsDropEnabled);
-        item->setCheckState(settings.setIds.contains(id) ? Qt::Checked : Qt::Unchecked);
-        item->setIcon(QPixmap::fromImage(SetLibrary::preview(*found, QSize(90, 50))));
-        item->setToolTip(found->problem);
+    desktopOrder = settings.setIds;
+    lockScreenOrder = settings.lockScreenSetIds;
+    const auto sets = SetLibrary(managedRoot).sets();
+    const QSet<QString> desktopSelected(desktopOrder.cbegin(), desktopOrder.cend());
+    const QSet<QString> lockSelected(lockScreenOrder.cbegin(), lockScreenOrder.cend());
+    for (const auto &set : sets) {
+        const QIcon preview(QPixmap::fromImage(SetLibrary::preview(set, QSize(90, 50))));
+        list->addSet(set, preview, desktopSelected.contains(set.id) ? Qt::Checked : Qt::Unchecked);
+        lockScreenList->addSet(set, preview, lockSelected.contains(set.id) ? Qt::Checked : Qt::Unchecked);
     }
+    for (auto *items : {list, lockScreenList}) {
+        items->refreshSort();
+        connect(items, &WallpaperSetList::itemChanged, this, markDirty);
+        auto *other = items == list ? lockScreenList : list;
+        auto *order = items == list ? &desktopOrder : &lockScreenOrder;
+        const auto captureOrder = [items, order, markDirty] {
+            if (checkedPlaybackOrder(items, *order) != items->setIds(true)) markDirty();
+            *order = items->setIds();
+        };
+        connect(items, &WallpaperSetList::orderEdited, this, captureOrder);
+        connect(items, &WallpaperSetList::headerSorted, this, [other, captureOrder](int column, Qt::SortOrder direction) {
+            captureOrder();
+            other->sortBy(column, direction);
+        });
+        auto *header = items->header();
+        header->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(header, &QHeaderView::customContextMenuRequested, this, [items, order, header](const QPoint &point) {
+            QMenu menu;
+            auto *showOrder = menu.addAction(tr("Show playback order"));
+            if (menu.exec(header->viewport()->mapToGlobal(point)) == showOrder)
+                items->showPlaybackOrder(checkedPlaybackOrder(items, *order));
+        });
+    }
+    lockScreenMode->setCurrentIndex(lockScreenMode->findData(static_cast<int>(settings.lockScreenMode)));
+    const auto updatePlaylistTabs = [this, playlists] {
+        const bool separate = lockScreenMode->currentData().toInt() == static_cast<int>(LockScreenRotation::SeparatePlaylist);
+        playlists->setTabVisible(1, separate);
+    };
+    updatePlaylistTabs();
     interval->setValue(settings.intervalMinutes);
     enabled->setChecked(settings.enabled);
     shuffle->setChecked(settings.shuffle);
@@ -94,36 +170,20 @@ SlideshowDialog::SlideshowDialog(QWidget *parent, const QString &managedRoot,
         nextButton->setEnabled(false);
     } else updateStatus();
 
-    const auto markDirty = [this] { dirty = true; nextButton->setEnabled(false); };
-    connect(list, &QListWidget::itemChanged, this, markDirty);
-    connect(list->model(), &QAbstractItemModel::rowsMoved, this, markDirty);
     connect(interval, &QSpinBox::valueChanged, this, markDirty);
     connect(enabled, &QCheckBox::toggled, this, markDirty);
     connect(shuffle, &QCheckBox::toggled, this, markDirty);
-    connect(all, &QPushButton::clicked, this, [this] {
-        for (int i = 0; i < list->count(); ++i) list->item(i)->setCheckState(Qt::Checked);
-    });
-    connect(none, &QPushButton::clicked, this, [this] {
-        for (int i = 0; i < list->count(); ++i) list->item(i)->setCheckState(Qt::Unchecked);
-    });
-    const auto move = [this, markDirty](int offset) {
-        const int row = list->currentRow();
-        if (row < 0 || row + offset < 0 || row + offset >= list->count()) return;
-        auto *item = list->takeItem(row);
-        list->insertItem(row + offset, item);
-        list->setCurrentItem(item);
+    connect(lockScreenMode, &QComboBox::currentIndexChanged, this, [playlists, updatePlaylistTabs, markDirty] {
+        updatePlaylistTabs();
+        if (playlists->isTabVisible(1)) playlists->setCurrentIndex(1);
         markDirty();
-    };
-    connect(up, &QPushButton::clicked, this, [move] { move(-1); });
-    connect(down, &QPushButton::clicked, this, [move] { move(1); });
+    });
     connect(buttons->button(QDialogButtonBox::Save), &QPushButton::clicked, this, [this] { save(); });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(refresh, &QPushButton::clicked, this, &SlideshowDialog::updateStatus);
     connect(nextButton, &QPushButton::clicked, this, [this] {
-        QList<QRect> layout;
-        for (auto *screen : QGuiApplication::screens()) layout.append(screen->geometry());
         DBusPlasmaApplicator applicator;
-        const auto result = slideshow.next(layout, applicator);
+        const auto result = slideshow.next(MonitorLayout::connectedMonitors(), applicator);
         if (!result.success) QMessageBox::warning(this, tr("Could not advance slideshow"), result.message);
         updateStatus();
     });
@@ -134,16 +194,19 @@ bool SlideshowDialog::save() {
     SlideshowSettings settings;
     settings.intervalMinutes = interval->value();
     settings.shuffle = shuffle->isChecked();
-    for (int i = 0; i < list->count(); ++i)
-        if (list->item(i)->checkState() == Qt::Checked)
-            settings.setIds.append(list->item(i)->data(Qt::UserRole).toString());
-    settings.enabled = enabled->isChecked() && !settings.setIds.isEmpty();
-    const auto result = slideshow.configure(settings, *scheduler);
+    desktopOrder = checkedPlaybackOrder(list, desktopOrder);
+    lockScreenOrder = checkedPlaybackOrder(lockScreenList, lockScreenOrder);
+    settings.setIds = desktopOrder;
+    settings.lockScreenSetIds = lockScreenOrder;
+    settings.lockScreenMode = static_cast<LockScreenRotation>(lockScreenMode->currentData().toInt());
+    settings.enabled = enabled->isChecked() && settings.hasPlaylist();
+    const auto result = slideshow.configure(settings, *scheduler, MonitorLayout::connectedMonitors());
     if (!result.success) {
         // Scheduler failures can happen after the playlist has been saved.
         // Reflect that persisted state and keep manual advancement available.
         SlideshowSettings saved;
         if (slideshow.load(&saved).success && saved.setIds == settings.setIds
+            && saved.lockScreenMode == settings.lockScreenMode && saved.lockScreenSetIds == settings.lockScreenSetIds
             && saved.intervalMinutes == settings.intervalMinutes && saved.shuffle == settings.shuffle) {
             const QSignalBlocker blocker(enabled);
             enabled->setChecked(saved.enabled);
@@ -173,10 +236,9 @@ void SlideshowDialog::reject() {
 void SlideshowDialog::updateStatus() {
     SlideshowSettings settings;
     const auto result = slideshow.load(&settings);
-    bool selected = false;
-    for (int i = 0; i < list->count(); ++i)
-        selected |= list->item(i)->checkState() == Qt::Checked;
-    nextButton->setEnabled(result.success && !dirty && selected && !settings.setIds.isEmpty());
+    const bool selected = !list->setIds(true).isEmpty()
+        || (settings.lockScreenMode == LockScreenRotation::SeparatePlaylist && !lockScreenList->setIds(true).isEmpty());
+    nextButton->setEnabled(result.success && !dirty && selected && settings.hasPlaylist());
     if (!result.success) { status->setText(result.message); return; }
     QString text;
     if (settings.enabled) {

@@ -2,7 +2,7 @@
 #define WALLPAPER_SPLITTER_SETLIBRARYDIALOG_H
 #include <QDialog>
 #include "setlibrary.h"
-class QListWidget;
+class WallpaperSetList;
 class QLabel;
 class QPlainTextEdit;
 class QPushButton;
@@ -14,7 +14,7 @@ public:
 private:
     SetLibrary library;
     QList<WallpaperSet> entries;
-    QListWidget *list;
+    WallpaperSetList *list;
     QLabel *previewLabel;
     QLabel *status;
     QPlainTextEdit *details;

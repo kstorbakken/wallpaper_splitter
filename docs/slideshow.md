@@ -6,29 +6,49 @@
 
 Open **Library → Slideshow…** to build a playlist from saved sets:
 
-1. Check the sets to include. Drag them into order, or use **Move up** and **Move down**.
-2. Choose an interval from **1 to 10080 minutes** (one week). The default is 30 minutes.
-3. Optionally enable **Shuffle** to choose randomly, avoiding consecutive repeats
-   when more than one usable set is available.
-4. Check **Rotate automatically while logged in** and click **Save**. You can then
-   close Wallpaper Splitter. The first scheduled change happens after the interval.
+1. In the **Desktop** tab, check the sets to include. Both tabs open in name
+   order. Click **Name** or **Date Added** to sort both lists. The playlist in
+   the tab you clicked takes that order. Drag rows or use **Move up** and
+   **Move down** to fine-tune it, then click **Save**. To see a playlist's
+   current sequence, right-click its header and choose **Show playback order**.
+2. Choose a **Lock screen** mode.
+   - **Off** leaves your current lock-screen wallpaper in place.
+   - **Match desktop** uses the exact set the desktop switches to, including when
+     Shuffle is on.
+   - **Separate playlist** adds a **Lock Screen** tab where you can select and
+     order its sets. It advances independently on the same interval. Clear the
+     desktop selection if you only want to rotate the lock screen.
+3. Choose an interval from **1 to 10080 minutes** (one week). The default is 30
+   minutes. **Shuffle** avoids consecutive repeats when more than one usable set
+   is available. Separate playlists shuffle independently.
+4. Check **Rotate automatically while logged in** and click **Save**. You can
+   then close Wallpaper Splitter. The first scheduled change happens after the
+   interval. On first use, saving automatic lock-screen rotation can set an
+   initial lock-screen wallpaper so the plugin is ready when you lock.
 
-**Next now** applies the next saved playlist entry immediately, even with automatic
+**Next now** advances the configured playlists immediately, even with automatic
 rotation off. Save playlist edits before using it. To stop rotation, uncheck
-**Rotate automatically while logged in** and click **Save**; the current wallpaper
-stays in place. Do this before uninstalling the app too.
+**Rotate automatically while logged in** and click **Save**. The current
+wallpapers stay in place. Do this before uninstalling the app too.
+
+## Live lock-screen updates
+
+Each display fades to its matching crop while the lock screen is visible. While
+only the displays are powered off, the slideshow continues publishing the latest
+set without requesting a display wake. When the displays turn back on, the lock
+screen uses that set and skips any expired transitions.
 
 ## Monitor layouts and deleted sets
 
-Each switch reapplies a complete set to whichever **Plasma activity is active at
-that moment**. Other activities keep their wallpapers. Saved monitor positions and
+Desktop changes apply to whichever **Plasma activity is active at that moment**.
+Other activities keep their wallpapers. Saved monitor positions and
 resolutions must match the connected layout. Missing, damaged, deleted, and
 incompatible sets are skipped; if none are usable, the wallpaper stays unchanged.
 
-Deleting sets through the Library also removes their playlist entries. Removing
-the last selected set turns automatic rotation off. The chooser shows only sets
-in the current library; click **Save** to discard stale entries retained by earlier
-versions. Original source images are not needed.
+Deleting sets through the Library removes them from both playlists. Removing the
+last separate lock-screen set switches its mode to **Off**. Automatic rotation
+stops when there are no selected sets left to rotate. The chooser shows only sets
+in the current library. Original source images are not needed.
 
 ## Scheduling and AppImages
 
@@ -48,8 +68,10 @@ the saved service preserves that setting.
 
 ## Troubleshooting
 
-The dialog shows the last switch attempt and any saved error. **Refresh status**
-checks the timer again; clicking **Save** repairs or restarts its configuration.
+The dialog shows the last switch attempt and any saved error. With separate
+playlists, a failure on one wallpaper can leave the other rotation running.
+**Refresh status** checks the timer again. Clicking **Save** repairs or restarts
+its configuration.
 For scheduler or launch failures, inspect the user service:
 
 ```sh

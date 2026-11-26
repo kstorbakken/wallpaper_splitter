@@ -56,4 +56,6 @@ This works even when automatic rotation is off. It cannot be combined with an
 input image or export/apply options. The timer uses `--slideshow-tick`, which does
 nothing when automatic rotation is disabled. Both commands exit after one attempt.
 
+Both commands use the saved desktop playlist and **Lock screen** mode.
+
 See the [slideshow guide](slideshow.md) for playlist setup and troubleshooting.

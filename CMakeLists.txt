@@ -37,6 +37,7 @@ add_library(wallpaper_splitter_core STATIC
         src/settingsdialog.cpp
         src/setlibrary.cpp
         src/setlibrarydialog.cpp
+        src/wallpapersetlist.cpp
         src/slideshow.cpp
         src/slideshowdialog.cpp
         src/monitorlayout.cpp
@@ -57,6 +58,7 @@ qt_add_resources(wallpaper_splitter_core lockscreen_wallpaper
         BASE assets/lockscreen-wallpaper
         FILES
         assets/lockscreen-wallpaper/contents/config/main.xml
+        assets/lockscreen-wallpaper/contents/ui/ScreenWallpaper.qml
         assets/lockscreen-wallpaper/contents/ui/main.qml
         assets/lockscreen-wallpaper/metadata.json
 )
@@ -113,7 +115,7 @@ include(CPack)
 
 include(CTest)
 if(BUILD_TESTING)
-    find_package(Qt6 REQUIRED COMPONENTS Test Qml)
+    find_package(Qt6 REQUIRED COMPONENTS Test Qml Quick)
 
     foreach(test_name IN ITEMS splitimage slideshow)
         qt_add_executable(${test_name}_test tests/${test_name}_test.cpp)
@@ -124,5 +126,5 @@ if(BUILD_TESTING)
         set_tests_properties(${test_name}_test PROPERTIES
                 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-config/${test_name}")
     endforeach()
-    target_link_libraries(splitimage_test PRIVATE Qt6::Qml)
+    target_link_libraries(splitimage_test PRIVATE Qt6::Qml Qt6::Quick)
 endif()

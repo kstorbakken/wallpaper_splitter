@@ -6,6 +6,7 @@
 #include <iostream>
 
 #include "appsettings.h"
+#include "monitorlayout.h"
 #include "slideshow.h"
 #include "outputservice.h"
 #include "wallpapersplitter.h"
@@ -154,10 +155,9 @@ int main(int argc, char *argv[]) {
             std::cerr << "Slideshow commands cannot be combined with an input image or other options.\n";
             return 2;
         }
-        QList<QRect> layout;
-        for (auto *screen : QGuiApplication::screens()) layout.append(screen->geometry());
+        const auto monitors = MonitorLayout::connectedMonitors();
         DBusPlasmaApplicator applicator;
-        const auto result = Slideshow().next(layout, applicator, parser.isSet("slideshow-tick"));
+        const auto result = Slideshow().next(monitors, applicator, parser.isSet("slideshow-tick"));
         if (!result.success) std::cerr << qPrintable(result.message) << '\n';
         return result.success ? 0 : exitCode(result.error);
     }

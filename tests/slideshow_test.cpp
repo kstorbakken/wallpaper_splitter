@@ -1,20 +1,28 @@
 #include "slideshow.h"
 #include "slideshowdialog.h"
+#include "monitorlayout.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
-#include <QListWidget>
+#include <QHeaderView>
+#include "wallpapersetlist.h"
 #include <QLockFile>
 #include <QMessageBox>
 #include <QProcess>
 #include <QPushButton>
+#include <QSettings>
 #include <QSpinBox>
 #include <QStandardPaths>
+#include <QTabWidget>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QtTest>
 
 namespace {
@@ -66,7 +74,7 @@ struct Fixture {
     Slideshow slideshow{config, root};
     FakePlasma plasma;
     FakeScheduler scheduler;
-    QList<QRect> layout{QRect(0, 0, 10, 10)};
+    QList<MonitorInfo> monitors{{"monitor", "DP-1", QRect(0, 0, 10, 10), {}, {}}};
 
     QString addSet(const QColor &color, const QSize &size = QSize(10, 10)) {
         QImage image(size, QImage::Format_RGB32);
@@ -83,12 +91,41 @@ struct Fixture {
         return value;
     }
 };
+
+struct LockScreenFixture : Fixture {
+    const QByteArray oldConfig = qgetenv("XDG_CONFIG_HOME");
+    const QByteArray oldData = qgetenv("XDG_DATA_HOME");
+    const QString statePath = temp.filePath("config/wallpaper-splitter/lockscreen.ini");
+
+    LockScreenFixture() {
+        qputenv("XDG_CONFIG_HOME", QFile::encodeName(temp.filePath("config")));
+        qputenv("XDG_DATA_HOME", QFile::encodeName(temp.filePath("data")));
+    }
+
+    ~LockScreenFixture() {
+        if (oldConfig.isNull()) qunsetenv("XDG_CONFIG_HOME");
+        else qputenv("XDG_CONFIG_HOME", oldConfig);
+        if (oldData.isNull()) qunsetenv("XDG_DATA_HOME");
+        else qputenv("XDG_DATA_HOME", oldData);
+    }
+
+    QString lockScreenSet() const {
+        const QSettings state(statePath, QSettings::IniFormat);
+        const auto slide = QJsonDocument::fromJson(state.value("CurrentSlide").toString().toUtf8()).object();
+        const auto crops = slide.value("crops").toArray();
+        const QUrl crop(crops.at(0).toObject().value("url").toString());
+        return QFileInfo(crop.toLocalFile()).dir().dirName();
+    }
+};
 }
 
 class SlideshowTest : public QObject {
     Q_OBJECT
 private slots:
     void orderedPlaybackSurvivesRestartAndEdits();
+    void optionallyMirrorsTheSuccessfulDesktopSlide();
+    void separateLockScreenPlaylistAdvancesIndependently();
+    void deletingLockScreenSetsKeepsAnyRemainingRotation();
     void removesDeletedSetsWithoutResettingRemainingPlaylist();
     void removingLastSetDisablesRotationWhenSchedulerFails();
     void shuffleAvoidsImmediateRepeats();
@@ -108,6 +145,7 @@ private slots:
     void schedulerReportsFailureAndUsesAppImagePath();
     void schedulerStatusReportsLaunchFailures();
     void dialogSavesPlaylistOrderAndSettings();
+    void dialogSavesLockScreenChoices();
     void dialogOmitsDeletedSetsAndSavesCleanPlaylist();
     void dialogCanSaveEmptyPlaylistAfterAllSetsWereDeleted();
     void dialogKeepsManualPlaybackAvailableAfterSchedulerFailure();
@@ -125,23 +163,193 @@ void SlideshowTest::orderedPlaybackSurvivesRestartAndEdits() {
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
     QVERIFY(f.scheduler.active);
     QCOMPARE(f.scheduler.interval, 17);
-    QVERIFY(f.slideshow.next(f.layout, f.plasma, true).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma, true).success);
     QCOMPARE(f.settings().lastSetId, a);
     Slideshow restarted(f.config, f.root);
-    QVERIFY(restarted.next(f.layout, f.plasma, true).success);
+    QVERIFY(restarted.next(f.monitors, f.plasma, true).success);
     QCOMPARE(f.settings().lastSetId, b);
     // A dialog opened before a switch must not overwrite the latest cursor.
     settings.intervalMinutes = 25;
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
     QCOMPARE(f.settings().lastSetId, b);
-    QVERIFY(restarted.next(f.layout, f.plasma, true).success);
+    QVERIFY(restarted.next(f.monitors, f.plasma, true).success);
     QCOMPARE(f.settings().lastSetId, c);
-    QVERIFY(restarted.next(f.layout, f.plasma, true).success);
+    QVERIFY(restarted.next(f.monitors, f.plasma, true).success);
     QCOMPARE(f.settings().lastSetId, a);
     settings.setIds = {c, b}; // Removing the last set starts at the first remaining entry.
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
-    QVERIFY(restarted.next(f.layout, f.plasma, true).success);
+    QVERIFY(restarted.next(f.monitors, f.plasma, true).success);
     QCOMPARE(f.settings().lastSetId, c);
+}
+
+void SlideshowTest::optionallyMirrorsTheSuccessfulDesktopSlide() {
+    LockScreenFixture f;
+    SlideshowSettings settings;
+    settings.setIds = {f.addSet(Qt::red), f.addSet(Qt::green), f.addSet(Qt::blue)};
+    // A version 1 settings file written before lock screen rotation defaults to Off.
+    QVERIFY(QDir().mkpath(QFileInfo(f.config).absolutePath()));
+    QFile legacy(f.config);
+    QVERIFY(legacy.open(QIODevice::WriteOnly));
+    legacy.write(QJsonDocument(QJsonObject{{"schemaVersion", 1}, {"enabled", false}, {"shuffle", false},
+        {"intervalMinutes", 30}, {"setIds", QJsonArray::fromStringList(settings.setIds)}}).toJson());
+    legacy.close();
+    QCOMPARE(f.settings().lockScreenMode, LockScreenRotation::Off);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma).success);
+    QVERIFY(!QFileInfo::exists(f.statePath));
+
+    settings.lockScreenMode = LockScreenRotation::MatchDesktop;
+    settings.enabled = true;
+    settings.shuffle = true;
+    const auto configured = f.slideshow.configure(settings, f.scheduler, f.monitors);
+    QVERIFY2(configured.success, qPrintable(configured.message));
+    QCOMPARE(f.lockScreenSet(), settings.setIds.first());
+    const auto result = f.slideshow.next(f.monitors, f.plasma, true);
+    QVERIFY2(result.success, qPrintable(result.message));
+    const auto shown = f.settings().lastSetId;
+    QVERIFY(shown != settings.setIds.first());
+    QCOMPARE(f.lockScreenSet(), shown);
+    QCOMPARE(QFileInfo(f.plasma.paths.first()).dir().dirName(), shown);
+
+    f.plasma.succeeds = false;
+    QVERIFY(!f.slideshow.next(f.monitors, f.plasma, true).success);
+    QCOMPARE(f.settings().lastSetId, shown);
+    QCOMPARE(f.lockScreenSet(), shown);
+}
+
+void SlideshowTest::separateLockScreenPlaylistAdvancesIndependently() {
+    LockScreenFixture f;
+    const auto first = f.addSet(Qt::red);
+    const auto second = f.addSet(Qt::green);
+    const auto incompatible = f.addSet(Qt::blue, QSize(20, 10));
+    SlideshowSettings settings;
+    settings.setIds = {first, second};
+    settings.lockScreenMode = LockScreenRotation::SeparatePlaylist;
+    settings.lockScreenSetIds = {incompatible, second, first};
+    QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
+
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma).success);
+    QCOMPARE(f.settings().lastSetId, first);
+    QCOMPARE(f.settings().lastLockScreenSetId, second);
+    QCOMPARE(f.lockScreenSet(), second);
+
+    f.plasma.succeeds = false;
+    const auto partial = Slideshow(f.config, f.root).next(f.monitors, f.plasma);
+    QVERIFY(!partial.success);
+    QVERIFY(partial.message.contains("Desktop:"));
+    QCOMPARE(f.settings().lastSetId, first);
+    QCOMPARE(f.settings().lastLockScreenSetId, first);
+    QCOMPARE(f.lockScreenSet(), first);
+
+    f.plasma.succeeds = true;
+    settings.lockScreenSetIds = {incompatible};
+    QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
+    const auto lockFailure = f.slideshow.next(f.monitors, f.plasma);
+    QVERIFY(!lockFailure.success);
+    QVERIFY(lockFailure.message.contains("Lock screen:"));
+    QCOMPARE(f.settings().lastSetId, second);
+    QCOMPARE(f.lockScreenSet(), first);
+}
+
+void SlideshowTest::deletingLockScreenSetsKeepsAnyRemainingRotation() {
+    LockScreenFixture f;
+    const auto desktop = f.addSet(Qt::red);
+    const auto lockScreen = f.addSet(Qt::green);
+    SlideshowSettings settings;
+    settings.enabled = true;
+    settings.setIds = {desktop};
+    settings.lockScreenMode = LockScreenRotation::SeparatePlaylist;
+    settings.lockScreenSetIds = {lockScreen};
+    QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
+    QVERIFY(f.slideshow.removeSets({lockScreen}, f.scheduler).success);
+    QCOMPARE(f.settings().lockScreenMode, LockScreenRotation::Off);
+    QVERIFY(f.settings().enabled);
+    QVERIFY(f.scheduler.active);
+
+    QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
+    QVERIFY(f.slideshow.removeSets({desktop}, f.scheduler).success);
+    QVERIFY(f.settings().enabled);
+    f.plasma.calls = 0;
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma, true).success);
+    QCOMPARE(f.plasma.calls, 0);
+    QCOMPARE(f.lockScreenSet(), lockScreen);
+
+    QVERIFY(f.slideshow.removeSets({lockScreen}, f.scheduler).success);
+    QVERIFY(f.settings().lastLockScreenSetId.isEmpty());
+    QVERIFY(!f.settings().enabled);
+    QVERIFY(!f.scheduler.active);
+}
+
+void SlideshowTest::dialogSavesLockScreenChoices() {
+    Fixture f;
+    const auto first = f.addSet(Qt::red);
+    const auto second = f.addSet(Qt::green);
+    const auto duplicate = f.addSet(Qt::blue);
+    SetLibrary library(f.root);
+    QVERIFY(library.rename(first, "Zulu").success);
+    QVERIFY(library.rename(second, "Alpha").success);
+    QVERIFY(library.rename(duplicate, "Alpha").success);
+    QStringList alphabetical{second, duplicate};
+    alphabetical.sort();
+    alphabetical.append(first);
+    SlideshowDialog dialog(nullptr, f.root, f.config, &f.scheduler);
+    auto *mode = dialog.findChild<QComboBox *>("slideshowLockScreenMode");
+    auto *playlists = dialog.findChild<QTabWidget *>("slideshowPlaylists");
+    auto *desktop = dialog.findChild<WallpaperSetList *>("slideshowSets");
+    auto *lockScreen = dialog.findChild<WallpaperSetList *>("slideshowLockScreenSets");
+    auto *save = dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save);
+    auto *next = dialog.findChild<QPushButton *>("slideshowNext");
+    QCOMPARE(mode->currentText(), "Off");
+    QVERIFY(!playlists->isTabVisible(1));
+    for (int i = 0; i < desktop->topLevelItemCount(); ++i)
+        if (desktop->topLevelItem(i)->data(0, Qt::UserRole).toString() == first)
+            desktop->topLevelItem(i)->setCheckState(0, Qt::Checked);
+
+    mode->setCurrentText("Match desktop");
+    save->click();
+    QCOMPARE(f.settings().lockScreenMode, LockScreenRotation::MatchDesktop);
+    QVERIFY(next->isEnabled());
+    QVERIFY(!playlists->isTabVisible(1));
+
+    mode->setCurrentText("Separate playlist");
+    QVERIFY(playlists->isTabVisible(1));
+    QVERIFY(!next->isEnabled());
+    QCOMPARE(playlists->currentIndex(), 1);
+    for (int i = 0; i < lockScreen->topLevelItemCount(); ++i)
+        if (lockScreen->topLevelItem(i)->data(0, Qt::UserRole).toString() == second)
+            lockScreen->topLevelItem(i)->setCheckState(0, Qt::Checked);
+    save->click();
+    QVERIFY(next->isEnabled());
+    QCOMPARE(f.settings().setIds, QStringList{first});
+    QCOMPARE(f.settings().lockScreenSetIds, QStringList{second});
+
+    SlideshowDialog reopened(nullptr, f.root, f.config, &f.scheduler);
+    auto *reopenedMode = reopened.findChild<QComboBox *>("slideshowLockScreenMode");
+    auto *reopenedLockScreen = reopened.findChild<WallpaperSetList *>("slideshowLockScreenSets");
+    QCOMPARE(reopenedMode->currentText(), "Separate playlist");
+    auto *reopenedDesktop = reopened.findChild<WallpaperSetList *>("slideshowSets");
+    QCOMPARE(reopenedDesktop->topLevelItemCount(), alphabetical.size());
+    QCOMPARE(reopenedLockScreen->topLevelItemCount(), alphabetical.size());
+    for (int i = 0; i < alphabetical.size(); ++i) {
+        const auto &id = alphabetical.at(i);
+        QCOMPARE(reopenedDesktop->topLevelItem(i)->data(0, Qt::UserRole).toString(), id);
+        QCOMPARE(reopenedLockScreen->topLevelItem(i)->data(0, Qt::UserRole).toString(), id);
+        QCOMPARE(reopenedDesktop->topLevelItem(i)->checkState(0), id == first ? Qt::Checked : Qt::Unchecked);
+        QCOMPARE(reopenedLockScreen->topLevelItem(i)->checkState(0), id == second ? Qt::Checked : Qt::Unchecked);
+    }
+    reopened.show();
+    reopened.findChild<QTabWidget *>("slideshowPlaylists")->setCurrentIndex(1);
+    auto *header = reopenedLockScreen->header();
+    QTest::mouseClick(header->viewport(), Qt::LeftButton, Qt::NoModifier,
+        QPoint(header->sectionViewportPosition(WallpaperSetList::DateAdded) + 8, header->height() / 2));
+    QCOMPARE(reopenedDesktop->header()->sortIndicatorSection(), WallpaperSetList::DateAdded);
+    QCOMPARE(reopenedDesktop->setIds(), reopenedLockScreen->setIds());
+    QCOMPARE(reopenedDesktop->setIds(true), QStringList{first});
+    QCOMPARE(reopenedLockScreen->setIds(true), QStringList{second});
+
+    reopenedMode->setCurrentText("Off");
+    reopened.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+    QCOMPARE(f.settings().lockScreenMode, LockScreenRotation::Off);
+    QCOMPARE(f.settings().lockScreenSetIds, QStringList{second});
 }
 
 void SlideshowTest::removesDeletedSetsWithoutResettingRemainingPlaylist() {
@@ -154,7 +362,7 @@ void SlideshowTest::removesDeletedSetsWithoutResettingRemainingPlaylist() {
     settings.enabled = true;
     settings.intervalMinutes = 17;
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
-    QVERIFY(f.slideshow.next(f.layout, f.plasma).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma).success);
     settings = f.settings();
     settings.shuffle = true;
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
@@ -188,7 +396,7 @@ void SlideshowTest::removingLastSetDisablesRotationWhenSchedulerFails() {
     QVERIFY(f.settings().setIds.isEmpty());
     QVERIFY(!f.settings().enabled);
     f.plasma.calls = 0;
-    QVERIFY(f.slideshow.next(f.layout, f.plasma, true).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma, true).success);
     QCOMPARE(f.plasma.calls, 0);
 }
 
@@ -200,7 +408,7 @@ void SlideshowTest::shuffleAvoidsImmediateRepeats() {
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
     QString previous;
     for (int i = 0; i < 30; ++i) {
-        QVERIFY(f.slideshow.next(f.layout, f.plasma).success);
+        QVERIFY(f.slideshow.next(f.monitors, f.plasma).success);
         const QString current = f.settings().lastSetId;
         QVERIFY(settings.setIds.contains(current));
         QVERIFY(current != previous);
@@ -208,7 +416,7 @@ void SlideshowTest::shuffleAvoidsImmediateRepeats() {
     }
     settings.setIds = {previous};
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
-    QVERIFY(f.slideshow.next(f.layout, f.plasma).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma).success);
     QCOMPARE(f.settings().lastSetId, previous);
 }
 
@@ -230,12 +438,12 @@ void SlideshowTest::skipsUnusableSetsAndKeepsWallpaperWhenNoneMatch() {
     settings.setIds = {missing, incompatible, broken, good};
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
     f.plasma.calls = 0;
-    QVERIFY(f.slideshow.next(f.layout, f.plasma).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma).success);
     QCOMPARE(f.plasma.calls, 1);
     QCOMPARE(f.settings().lastSetId, good);
     QVERIFY(library.remove(good, f.plasma).success);
     f.plasma.calls = 0;
-    const auto result = f.slideshow.next(f.layout, f.plasma);
+    const auto result = f.slideshow.next(f.monitors, f.plasma);
     QVERIFY(!result.success);
     QVERIFY(result.message.contains("No usable"));
     QCOMPARE(f.plasma.calls, 0);
@@ -250,15 +458,15 @@ void SlideshowTest::failureDoesNotAdvanceOrApplyAnotherSet() {
     SlideshowSettings settings;
     settings.setIds = {a, b, c};
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
-    QVERIFY(f.slideshow.next(f.layout, f.plasma).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma).success);
     f.plasma.calls = 0;
     f.plasma.succeeds = false;
-    QVERIFY(!f.slideshow.next(f.layout, f.plasma).success);
+    QVERIFY(!f.slideshow.next(f.monitors, f.plasma).success);
     QCOMPARE(f.plasma.calls, 1);
     QCOMPARE(f.settings().lastSetId, a);
     QCOMPARE(f.settings().lastError, "Plasma unavailable");
     f.plasma.succeeds = true;
-    QVERIFY(f.slideshow.next(f.layout, f.plasma).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma).success);
     QCOMPARE(f.settings().lastSetId, b);
     QVERIFY(f.settings().lastError.isEmpty());
     // A failure saving the manifest after Plasma changed must also stop the loop.
@@ -268,7 +476,7 @@ void SlideshowTest::failureDoesNotAdvanceOrApplyAnotherSet() {
         QVERIFY(QFile::remove(manifest));
         QVERIFY(QDir().mkdir(manifest));
     };
-    QVERIFY(!f.slideshow.next(f.layout, f.plasma).success);
+    QVERIFY(!f.slideshow.next(f.monitors, f.plasma).success);
     QCOMPARE(f.plasma.calls, 1);
     QCOMPARE(f.settings().lastSetId, b);
 }
@@ -279,10 +487,10 @@ void SlideshowTest::disabledTickDoesNothingButManualNextWorks() {
     settings.setIds = {f.addSet(Qt::blue)};
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
     f.plasma.calls = 0;
-    QVERIFY(f.slideshow.next(f.layout, f.plasma, true).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma, true).success);
     QCOMPARE(f.plasma.calls, 0);
     QVERIFY(f.settings().lastAttempt.isEmpty());
-    QVERIFY(f.slideshow.next(f.layout, f.plasma).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma).success);
     QCOMPARE(f.plasma.calls, 1);
 }
 
@@ -309,7 +517,7 @@ void SlideshowTest::schedulerFailureLeavesRotationDisabled() {
     QVERIFY(f.scheduler.active); // Can't stop it, but the persisted off flag makes it harmless.
     QVERIFY(!f.settings().enabled);
     f.plasma.calls = 0;
-    QVERIFY(f.slideshow.next(f.layout, f.plasma, true).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma, true).success);
     QCOMPARE(f.plasma.calls, 0);
 }
 
@@ -357,7 +565,7 @@ void SlideshowTest::concurrentOperationsCannotRace() {
     QLockFile stateLock(f.config + ".lock");
     QVERIFY(stateLock.tryLock());
     f.plasma.calls = 0;
-    QVERIFY(!f.slideshow.next(f.layout, f.plasma).success);
+    QVERIFY(!f.slideshow.next(f.monitors, f.plasma).success);
     QVERIFY(!f.slideshow.configure(settings, f.scheduler).success);
     QVERIFY(!f.slideshow.removeSets({id}, f.scheduler).success);
     QCOMPARE(f.plasma.calls, 0);
@@ -365,7 +573,7 @@ void SlideshowTest::concurrentOperationsCannotRace() {
     QCOMPARE(f.settings().setIds, QStringList{id});
     QLockFile libraryLock(QDir(f.root).filePath(".operation.lock"));
     QVERIFY(libraryLock.tryLock());
-    const auto result = f.slideshow.next(f.layout, f.plasma);
+    const auto result = f.slideshow.next(f.monitors, f.plasma);
     QCOMPARE(result.error, OperationError::Collision);
     QCOMPARE(f.plasma.calls, 0);
     SetLibrary library(f.root);
@@ -373,7 +581,7 @@ void SlideshowTest::concurrentOperationsCannotRace() {
     QVERIFY(!library.remove(id, f.plasma).success);
     QCOMPARE(f.addSet(Qt::blue), QString());
     libraryLock.unlock();
-    QVERIFY(f.slideshow.next(f.layout, f.plasma).success);
+    QVERIFY(f.slideshow.next(f.monitors, f.plasma).success);
 }
 
 void SlideshowTest::validatesSettingsWithoutClobberingSavedPlaylist() {
@@ -399,7 +607,7 @@ void SlideshowTest::validatesSettingsWithoutClobberingSavedPlaylist() {
     file.write("{\"schemaVersion\":99}");
     file.close();
     f.plasma.calls = 0;
-    QVERIFY(!f.slideshow.next(f.layout, f.plasma, true).success);
+    QVERIFY(!f.slideshow.next(f.monitors, f.plasma, true).success);
     QVERIFY(!f.slideshow.configure(settings, f.scheduler).success);
     QCOMPARE(f.plasma.calls, 0);
     QVERIFY(!f.slideshow.removeSets(settings.setIds, f.scheduler).success);
@@ -645,16 +853,35 @@ void SlideshowTest::schedulerStatusReportsLaunchFailures() {
 void SlideshowTest::dialogSavesPlaylistOrderAndSettings() {
     Fixture f;
     const auto a = f.addSet(Qt::red), b = f.addSet(Qt::blue);
+    SetLibrary library(f.root);
+    QVERIFY(library.rename(a, "Alpha").success);
+    QVERIFY(library.rename(b, "Bravo").success);
     SlideshowSettings settings;
     settings.setIds = {a, b};
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
     SlideshowDialog dialog(nullptr, f.root, f.config, &f.scheduler);
-    auto *list = dialog.findChild<QListWidget *>("slideshowSets");
+    dialog.show();
+    auto *list = dialog.findChild<WallpaperSetList *>("slideshowSets");
+    auto *next = dialog.findChild<QPushButton *>("slideshowNext");
     QVERIFY(list);
-    QCOMPARE(list->count(), 2);
-    QCOMPARE(list->item(0)->data(Qt::UserRole).toString(), a);
-    auto *item = list->takeItem(0);
-    list->addItem(item);
+    QCOMPARE(list->topLevelItemCount(), 2);
+    QCOMPARE(list->topLevelItem(0)->data(0, Qt::UserRole).toString(), a);
+    auto *header = list->header();
+    QCOMPARE(list->dragDropMode(), QAbstractItemView::InternalMove);
+    QVERIFY(next->isEnabled());
+    const auto clickHeader = [header](int column) {
+        QTest::mouseClick(header->viewport(), Qt::LeftButton, Qt::NoModifier,
+            QPoint(header->sectionViewportPosition(column) + 8, header->height() / 2));
+    };
+    clickHeader(WallpaperSetList::Name);
+    QCOMPARE(list->setIds(), (QStringList{b, a}));
+    QCOMPARE(header->sortIndicatorOrder(), Qt::DescendingOrder);
+    clickHeader(WallpaperSetList::Name);
+    QCOMPARE(list->topLevelItem(0)->data(0, Qt::UserRole).toString(), a);
+    list->setCurrentItem(list->topLevelItem(0));
+    list->parentWidget()->findChild<QPushButton *>("moveSetDown")->click();
+    QCOMPARE(list->setIds(), (QStringList{b, a}));
+    QVERIFY(!header->isSortIndicatorShown());
     dialog.findChild<QSpinBox *>("slideshowInterval")->setValue(45);
     dialog.findChild<QCheckBox *>("slideshowEnabled")->setChecked(true);
     dialog.findChild<QCheckBox *>("slideshowShuffle")->setChecked(true);
@@ -667,7 +894,9 @@ void SlideshowTest::dialogSavesPlaylistOrderAndSettings() {
     QVERIFY(dialog.findChild<QPushButton *>("slideshowNext")->isEnabled());
     QVERIFY(dialog.findChild<QLabel *>("slideshowStatus")->text().contains("rotation is on"));
     SlideshowDialog reopened(nullptr, f.root, f.config, &f.scheduler);
-    QCOMPARE(reopened.findChild<QListWidget *>("slideshowSets")->item(0)->data(Qt::UserRole).toString(), b);
+    QCOMPARE(reopened.findChild<WallpaperSetList *>("slideshowSets")->topLevelItem(0)->data(0, Qt::UserRole).toString(), a);
+    reopened.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+    QCOMPARE(f.settings().setIds, (QStringList{b, a}));
 }
 
 void SlideshowTest::dialogOmitsDeletedSetsAndSavesCleanPlaylist() {
@@ -680,19 +909,19 @@ void SlideshowTest::dialogOmitsDeletedSetsAndSavesCleanPlaylist() {
     QVERIFY(SetLibrary(f.root).remove(deleted, f.plasma).success);
     const auto added = f.addSet(Qt::yellow);
     SlideshowDialog dialog(nullptr, f.root, f.config, &f.scheduler);
-    auto *list = dialog.findChild<QListWidget *>("slideshowSets");
-    QCOMPARE(list->count(), 3);
-    QCOMPARE(list->item(0)->data(Qt::UserRole).toString(), b);
-    QCOMPARE(list->item(1)->data(Qt::UserRole).toString(), a);
-    QCOMPARE(list->item(2)->data(Qt::UserRole).toString(), added);
-    QCOMPARE(list->item(0)->checkState(), Qt::Checked);
-    QCOMPARE(list->item(1)->checkState(), Qt::Checked);
-    QCOMPARE(list->item(2)->checkState(), Qt::Unchecked);
+    auto *list = dialog.findChild<WallpaperSetList *>("slideshowSets");
+    QCOMPARE(list->topLevelItemCount(), 3);
+    QCOMPARE(list->topLevelItem(0)->data(0, Qt::UserRole).toString(), b);
+    QCOMPARE(list->topLevelItem(1)->data(0, Qt::UserRole).toString(), a);
+    QCOMPARE(list->topLevelItem(2)->data(0, Qt::UserRole).toString(), added);
+    QCOMPARE(list->topLevelItem(0)->checkState(0), Qt::Checked);
+    QCOMPARE(list->topLevelItem(1)->checkState(0), Qt::Checked);
+    QCOMPARE(list->topLevelItem(2)->checkState(0), Qt::Unchecked);
     dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
     QCOMPARE(f.settings().setIds, (QStringList{b, a}));
     QVERIFY(f.settings().enabled);
     SlideshowDialog reopened(nullptr, f.root, f.config, &f.scheduler);
-    QCOMPARE(reopened.findChild<QListWidget *>("slideshowSets")->count(), 3);
+    QCOMPARE(reopened.findChild<WallpaperSetList *>("slideshowSets")->topLevelItemCount(), 3);
 }
 
 void SlideshowTest::dialogCanSaveEmptyPlaylistAfterAllSetsWereDeleted() {
@@ -704,7 +933,7 @@ void SlideshowTest::dialogCanSaveEmptyPlaylistAfterAllSetsWereDeleted() {
     QVERIFY(f.slideshow.configure(settings, f.scheduler).success);
     QVERIFY(SetLibrary(f.root).remove(id, f.plasma).success);
     SlideshowDialog dialog(nullptr, f.root, f.config, &f.scheduler);
-    QCOMPARE(dialog.findChild<QListWidget *>("slideshowSets")->count(), 0);
+    QCOMPARE(dialog.findChild<WallpaperSetList *>("slideshowSets")->topLevelItemCount(), 0);
     QVERIFY(!dialog.findChild<QPushButton *>("slideshowNext")->isEnabled());
     dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
     QVERIFY(f.settings().setIds.isEmpty());
@@ -740,8 +969,8 @@ void SlideshowTest::dialogKeepsManualPlaybackAvailableAfterSchedulerFailure() {
     const auto id = f.addSet(Qt::blue);
     f.scheduler.failEnable = true;
     SlideshowDialog dialog(nullptr, f.root, f.config, &f.scheduler);
-    auto *list = dialog.findChild<QListWidget *>("slideshowSets");
-    list->item(0)->setCheckState(Qt::Checked);
+    auto *list = dialog.findChild<WallpaperSetList *>("slideshowSets");
+    list->topLevelItem(0)->setCheckState(0, Qt::Checked);
     auto *enabled = dialog.findChild<QCheckBox *>("slideshowEnabled");
     enabled->setChecked(true);
     QTimer::singleShot(0, [] {

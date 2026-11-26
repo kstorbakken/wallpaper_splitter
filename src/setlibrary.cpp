@@ -16,6 +16,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
 #include <algorithm>
@@ -56,7 +57,8 @@ OperationResult validateLayout(const QList<ScreenCrop> &screens, QList<QRect> re
 OperationResult installLockScreenWallpaper() {
     const QDir data(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation));
     const QDir package(data.absoluteFilePath("plasma/wallpapers/" + splitWallpaperPlugin));
-    const QStringList files{"contents/config/main.xml", "contents/ui/main.qml", "metadata.json"};
+    const QStringList files{"contents/config/main.xml", "contents/ui/ScreenWallpaper.qml",
+                            "contents/ui/main.qml", "metadata.json"};
     for (const auto &file : files) {
         QFile resource(":/lockscreen-wallpaper/" + file);
         if (!resource.open(QIODevice::ReadOnly))
@@ -201,7 +203,19 @@ OperationResult SetLibrary::exportSet(const QString &id, const ExportOptions &op
     return OutputService::exportCrops(set.paths, set.screens, sourceName, options);
 }
 
-OperationResult SetLibrary::applyLockScreen(const QString &id, const QList<MonitorInfo> &monitors) const {
+bool SetLibrary::hasLiveLockScreen() {
+    const KConfig config(lockScreenConfigName, KConfig::NoGlobals);
+    const auto greeter = config.group("Greeter");
+    if (greeter.readEntry("WallpaperPlugin", QString()) != splitWallpaperPlugin) return false;
+    const auto wallpaper = greeter.group("Wallpaper").group(splitWallpaperPlugin).group("General");
+    const QUrl url(wallpaper.readEntry("LiveState", QString()));
+    return url.isLocalFile() && QFileInfo(url.toLocalFile()).isFile();
+}
+
+OperationResult SetLibrary::applyLockScreen(const QString &id, const QList<MonitorInfo> &monitors,
+                                            bool *applicationAttempted) const {
+    if (applicationAttempted) *applicationAttempted = false;
+    if (!QFileInfo(root).isDir()) return failure(QObject::tr("The wallpaper library is unavailable."));
     QLockFile lock(QDir(root).filePath(".operation.lock"));
     lock.setStaleLockTime(0);
     if (!lock.tryLock()) return OperationResult::failure(OperationError::Collision,
@@ -228,21 +242,38 @@ OperationResult SetLibrary::applyLockScreen(const QString &id, const QList<Monit
             {"url", QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded)}});
     }
 
+    if (applicationAttempted) *applicationAttempted = true;
     KConfig config(lockScreenConfigName, KConfig::NoGlobals);
     auto greeter = config.group("Greeter");
     auto wallpaper = greeter.group("Wallpaper").group(splitWallpaperPlugin).group("General");
-    if (config.accessMode() != KConfig::ReadWrite || greeter.isEntryImmutable("WallpaperPlugin")
-        || wallpaper.isEntryImmutable("ScreenCrops"))
+    const QString statePath = QDir(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation))
+        .filePath("wallpaper-splitter/lockscreen.ini");
+    const QString stateUrl = QUrl::fromLocalFile(statePath).toString(QUrl::FullyEncoded);
+    const bool configured = greeter.readEntry("WallpaperPlugin", QString()) == splitWallpaperPlugin
+        && wallpaper.readEntry("LiveState", QString()) == stateUrl;
+    if (!configured && (config.accessMode() != KConfig::ReadWrite
+        || greeter.isEntryImmutable("WallpaperPlugin") || wallpaper.isEntryImmutable("LiveState")))
         return OperationResult::failure(OperationError::Plasma,
             QObject::tr("The lock screen wallpaper settings are read-only."));
     result = installLockScreenWallpaper();
     if (!result.success) return result;
-    wallpaper.writeEntry("ScreenCrops", QString::fromUtf8(QJsonDocument(crops).toJson(QJsonDocument::Compact)));
-    greeter.writeEntry("WallpaperPlugin", splitWallpaperPlugin);
-    if (!config.sync()) {
-        config.markAsClean();
-        return OperationResult::failure(OperationError::Plasma,
-            QObject::tr("Could not save the lock screen wallpaper settings."));
+
+    // Publish the whole layout atomically with a common fade start for every display.
+    const QJsonObject slide{{"crops", crops}, {"fadeAt", QDateTime::currentMSecsSinceEpoch() + 750}};
+    QSettings state(statePath, QSettings::IniFormat);
+    state.setValue("CurrentSlide", QString::fromUtf8(QJsonDocument(slide).toJson(QJsonDocument::Compact)));
+    state.sync();
+    if (state.status() != QSettings::NoError)
+        return failure(QObject::tr("Could not publish the current lock screen wallpaper."));
+
+    if (!configured) {
+        wallpaper.writeEntry("LiveState", stateUrl);
+        greeter.writeEntry("WallpaperPlugin", splitWallpaperPlugin);
+        if (!config.sync()) {
+            config.markAsClean();
+            return OperationResult::failure(OperationError::Plasma,
+                QObject::tr("Could not save the lock screen wallpaper settings."));
+        }
     }
     return OperationResult::ok(set.paths);
 }
@@ -273,7 +304,17 @@ OperationResult SetLibrary::remove(const QString &id, PlasmaApplicator &applicat
     const QString plugin = greeter.readEntry("WallpaperPlugin", imageWallpaperPlugin);
     const auto wallpaper = greeter.group("Wallpaper").group(plugin).group("General");
     if (plugin == splitWallpaperPlugin) {
-        const auto crops = QJsonDocument::fromJson(wallpaper.readEntry("ScreenCrops", QString()).toUtf8()).array();
+        auto crops = QJsonDocument::fromJson(wallpaper.readEntry("ScreenCrops", QString()).toUtf8()).array();
+        const QUrl stateUrl(wallpaper.readEntry("LiveState", QString()));
+        if (!stateUrl.isEmpty()) {
+            const QString statePath = stateUrl.toLocalFile();
+            const QSettings state(statePath, QSettings::IniFormat);
+            const auto slide = QJsonDocument::fromJson(state.value("CurrentSlide").toString().toUtf8()).object();
+            crops = slide.value("crops").toArray();
+            if (statePath.isEmpty() || state.status() != QSettings::NoError || crops.isEmpty())
+                return OperationResult::failure(OperationError::Plasma,
+                    QObject::tr("Could not read the current lock screen wallpaper."));
+        }
         for (const auto &crop : crops) result.paths.append(crop.toObject().value("url").toString());
     } else {
         result.paths.append(wallpaper.readPathEntry("Image", QString()));

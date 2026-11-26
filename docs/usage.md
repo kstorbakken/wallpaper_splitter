@@ -71,8 +71,8 @@ preview, or when you close the preview dialog. Change **Preview duration** in
 Preview uses temporary crops and
 does not add a set to the library or write to your export folder. Temporary files
 are removed after Plasma confirms restoration; if restoration fails, the dialog
-keeps them and offers another attempt. The application's slideshow cannot switch
-wallpapers during a preview. Other activities' wallpapers are left as they were.
+keeps them and offers another attempt. Desktop slideshow rotation pauses during
+a preview. Other activities' wallpapers are left as they were.
 
 ## Export settings
 
@@ -105,7 +105,8 @@ and preview duration.
 
 ## Saved wallpaper sets
 
-Use <kbd>Library</kbd> to browse saved sets, with a preview, source image path,
+Use <kbd>Library</kbd> to browse saved sets. Click **Name** or **Date Added** to
+sort the list. Select a set to see its preview, source image path,
 creation time, monitor layout, crop mappings, and generated file paths. Reapply
 requires the saved monitor positions and resolutions to match the current layout;
 the original source image is not needed. Export saves a set's existing crops using

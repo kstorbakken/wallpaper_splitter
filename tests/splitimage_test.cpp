@@ -19,15 +19,19 @@
 #include <QPushButton>
 #include <QJsonDocument>
 #include <QJsonArray>
-#include <QListWidget>
+#include <QHeaderView>
+#include "wallpapersetlist.h"
 #include <QMenu>
 #include <QMessageBox>
 #include <QJsonObject>
 #include <QJSEngine>
+#include <QQuickView>
 #include <algorithm>
 #include <QSettings>
+#include <QSaveFile>
 #include <QScopeGuard>
 #include <QScrollBar>
+#include <QSplitter>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -85,6 +89,12 @@ public:
     QList<ScreenCrop> receivedScreens;
     QStringList receivedPaths;
 };
+
+QJsonObject currentLockScreenSlide(const KConfigGroup &wallpaper) {
+    const QUrl stateUrl(wallpaper.readEntry("LiveState", QString()));
+    const QSettings state(stateUrl.toLocalFile(), QSettings::IniFormat);
+    return QJsonDocument::fromJson(state.value("CurrentSlide").toString().toUtf8()).object();
+}
 }
 
 class SplitImageTest : public QObject {
@@ -128,6 +138,7 @@ private slots:
     void libraryReappliesAndPreservesMetadata();
     void libraryRejectsUnsafeDeletion();
     void libraryAppliesLockScreenAcrossDisplays();
+    void lockScreenCrossfadesPublishedCrops();
     void libraryHandlesBrokenSets();
     void libraryDialogShowsSets();
     void physicalLayoutCompensatesForPixelDensity();
@@ -333,7 +344,7 @@ void SplitImageTest::editorApplyMenuSavesAndAppliesToLockScreen() {
     const auto plugin = greeter.readEntry("WallpaperPlugin", QString());
     QCOMPARE(plugin, "io.github.kstorbakken.wallpaper_splitter.lockscreen");
     const auto wallpaper = greeter.group("Wallpaper").group(plugin).group("General");
-    const auto crops = QJsonDocument::fromJson(wallpaper.readEntry("ScreenCrops", QString()).toUtf8()).array();
+    const auto crops = currentLockScreenSlide(wallpaper).value("crops").toArray();
     QCOMPARE(crops.size(), QGuiApplication::screens().size());
     for (const auto &entry : crops) {
         const QImage lockCrop(QUrl(entry.toObject().value("url").toString()).toLocalFile());
@@ -1385,7 +1396,8 @@ void SplitImageTest::libraryAppliesLockScreenAcrossDisplays() {
     const auto applied = library.applyLockScreen(set.id, monitors);
     QVERIFY2(applied.success, qPrintable(applied.message));
     QCOMPARE(applied.paths, saved.paths);
-    for (const auto &file : {"metadata.json", "contents/config/main.xml", "contents/ui/main.qml"})
+    for (const auto &file : {"metadata.json", "contents/config/main.xml", "contents/ui/main.qml",
+                            "contents/ui/ScreenWallpaper.qml"})
         QVERIFY(package.exists(file));
 
     KConfig config("kscreenlockerrc", KConfig::NoGlobals);
@@ -1393,7 +1405,7 @@ void SplitImageTest::libraryAppliesLockScreenAcrossDisplays() {
     auto greeter = config.group("Greeter");
     QCOMPARE(greeter.readEntry("WallpaperPlugin", QString()), pluginId);
     auto wallpaper = greeter.group("Wallpaper").group(pluginId).group("General");
-    const auto crops = QJsonDocument::fromJson(wallpaper.readEntry("ScreenCrops", QString()).toUtf8()).array();
+    const auto crops = currentLockScreenSlide(wallpaper).value("crops").toArray();
     QCOMPARE(crops.size(), 2);
     QCOMPARE(crops.at(0).toObject().value("name").toString(), "DP-1");
     QCOMPARE(crops.at(1).toObject().value("name").toString(), "HDMI-1");
@@ -1409,6 +1421,91 @@ void SplitImageTest::libraryAppliesLockScreenAcrossDisplays() {
     greeter.writeEntry("WallpaperPlugin", "org.kde.color");
     QVERIFY(config.sync());
     QVERIFY(library.remove(set.id, plasma).success);
+}
+
+void SplitImageTest::lockScreenCrossfadesPublishedCrops() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString statePath = directory.filePath("current slide #1.ini");
+    const QList<QRect> geometries{QRect(0, 0, 32, 32), QRect(32, 0, 32, 32)};
+    const auto publish = [&](const QString &name, const QList<QColor> &colors, qint64 start) {
+        QJsonArray crops;
+        for (int i = 0; i < colors.size(); ++i) {
+            const QRect &geometry = geometries.at(i);
+            const QString path = directory.filePath(QString("%1-%2.png").arg(name).arg(i));
+            QImage image(geometry.size(), QImage::Format_RGB32);
+            image.fill(colors.at(i));
+            if (!image.save(path)) return false;
+            crops.append(QJsonObject{{"name", i == 0 ? "DP-1" : "DP-2"},
+                {"x", geometry.x()}, {"y", geometry.y()}, {"width", geometry.width()},
+                {"height", geometry.height()}, {"url", QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded)}});
+        }
+        const QJsonObject slide{{"crops", crops}, {"fadeAt", start}};
+        QSettings state(directory.filePath("publisher.ini"), QSettings::IniFormat);
+        state.setValue("CurrentSlide", QString::fromUtf8(QJsonDocument(slide).toJson(QJsonDocument::Compact)));
+        state.sync();
+        // Publish through the filesystem without sharing QSettings' in-process cache.
+        QFile staged(state.fileName());
+        QSaveFile output(statePath);
+        if (state.status() != QSettings::NoError || !staged.open(QIODevice::ReadOnly)
+            || !output.open(QIODevice::WriteOnly)) return false;
+        const auto bytes = staged.readAll();
+        return !bytes.isEmpty() && output.write(bytes) == bytes.size() && output.commit();
+    };
+    QVERIFY(publish("first", {Qt::red, Qt::blue}, 0));
+
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
+    QQuickView left;
+    QQuickView right;
+    const QList<QQuickView *> views{&left, &right};
+    for (int i = 0; i < views.size(); ++i) {
+        auto *view = views.at(i);
+        // The left view matches by name. The right view falls back to geometry.
+        view->setInitialProperties({{"stateLocation", QUrl::fromLocalFile(statePath)},
+            {"monitorName", i == 0 ? QStringLiteral("DP-1") : QStringLiteral("HDMI-1")},
+            {"monitorGeometry", geometries.at(i)}});
+        view->setResizeMode(QQuickView::SizeRootObjectToView);
+        view->resize(32, 32);
+        view->setColor(Qt::black);
+        view->setSource(QUrl("qrc:/lockscreen-wallpaper/contents/ui/ScreenWallpaper.qml"));
+        QVERIFY2(view->status() == QQuickView::Ready, qPrintable(view->errors().value(0).toString()));
+        view->show();
+    }
+    const auto pixel = [](QQuickView &view) {
+        const auto frame = view.grabWindow();
+        return frame.isNull() ? QColor() : frame.pixelColor(frame.rect().center());
+    };
+    QTRY_COMPARE(pixel(left), QColor(Qt::red));
+    QTRY_COMPARE(pixel(right), QColor(Qt::blue));
+
+    QVERIFY(publish("second", {Qt::green, Qt::yellow}, QDateTime::currentMSecsSinceEpoch() + 650));
+    bool bothFading = false;
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while (elapsed.elapsed() < 1600) {
+        QTest::qWait(20);
+        const QColor a = pixel(left);
+        const QColor b = pixel(right);
+        QVERIFY(a.isValid() && b.isValid());
+        QVERIFY(a.red() + a.green() >= 250);
+        QVERIFY(b.blue() + b.red() >= 250);
+        if (a.red() > 30 && a.green() > 30 && b.blue() > 30 && b.red() > 30) bothFading = true;
+        if (a == QColor(Qt::green) && b == QColor(Qt::yellow)) break;
+    }
+    QVERIFY(bothFading);
+    QCOMPARE(pixel(left), QColor(Qt::green));
+    QCOMPARE(pixel(right), QColor(Qt::yellow));
+
+    left.hide();
+    right.hide();
+    QVERIFY(publish("intermediate", {Qt::white, Qt::gray}, QDateTime::currentMSecsSinceEpoch() + 150));
+    QTest::qWait(650);
+    QVERIFY(publish("third", {Qt::cyan, Qt::magenta}, QDateTime::currentMSecsSinceEpoch() + 400));
+    QTest::qWait(1100);
+    left.show();
+    right.show();
+    QCOMPARE(pixel(left), QColor(Qt::cyan));
+    QCOMPARE(pixel(right), QColor(Qt::magenta));
 }
 
 void SplitImageTest::libraryHandlesBrokenSets() {
@@ -1466,20 +1563,22 @@ void SplitImageTest::libraryHandlesBrokenSets() {
 void SplitImageTest::libraryDialogShowsSets() {
     QTemporaryDir root;
     SetLibraryDialog empty(nullptr, root.path());
-    QCOMPARE(empty.findChild<QListWidget *>("setList")->count(), 0);
+    QCOMPARE(empty.findChild<WallpaperSetList *>("setList")->topLevelItemCount(), 0);
     auto *emptySelectAll = empty.findChild<QCheckBox *>("selectAllSets");
     QVERIFY(emptySelectAll);
     QVERIFY(!emptySelectAll->isEnabled());
     QImage image(10, 10, QImage::Format_RGB32);
     image.fill(Qt::green);
     FakePlasmaApplicator plasma(true);
-    QVERIFY(OutputService::applyManaged(image, image.size(),
-        {{"screen", 1, image.rect(), image.rect()}}, "green.png", {}, plasma, root.path()).success);
+    const QString greenName = QString(48, QLatin1Char('g')) + ".png";
+    const auto green = OutputService::applyManaged(image, image.size(),
+        {{"screen", 1, image.rect(), image.rect()}}, greenName, {}, plasma, root.path());
+    QVERIFY(green.success);
     SetLibraryDialog populated(nullptr, root.path());
-    auto *list = populated.findChild<QListWidget *>("setList");
-    QCOMPARE(list->count(), 1);
-    QCOMPARE(list->currentItem()->text(), "green.png");
-    QCOMPARE(list->currentItem()->checkState(), Qt::Unchecked);
+    auto *list = populated.findChild<WallpaperSetList *>("setList");
+    QCOMPARE(list->topLevelItemCount(), 1);
+    QCOMPARE(list->currentItem()->text(0), greenName);
+    QCOMPARE(list->currentItem()->checkState(0), Qt::Unchecked);
     auto *selectAll = populated.findChild<QCheckBox *>("selectAllSets");
     auto *deleteSelected = populated.findChild<QPushButton *>("deleteSelectedSets");
     auto *rename = populated.findChild<QPushButton *>("renameSet");
@@ -1493,42 +1592,82 @@ void SplitImageTest::libraryDialogShowsSets() {
     QVERIFY(exportSet->isEnabled());
     QCOMPARE(deleteSelected->text(), "Delete");
     selectAll->click();
-    QCOMPARE(list->currentItem()->checkState(), Qt::Checked);
+    QCOMPARE(list->currentItem()->checkState(0), Qt::Checked);
     QVERIFY(deleteSelected->isEnabled());
     QCOMPARE(deleteSelected->text(), "Delete selected (1)");
-    list->currentItem()->setCheckState(Qt::Unchecked);
+    list->currentItem()->setCheckState(0, Qt::Unchecked);
     QCOMPARE(selectAll->checkState(), Qt::Unchecked);
     QVERIFY(deleteSelected->isEnabled());
     QCOMPARE(deleteSelected->text(), "Delete");
 
     image.fill(Qt::blue);
-    QVERIFY(OutputService::applyManaged(image, image.size(),
-        {{"screen", 1, image.rect(), image.rect()}}, "blue.png", {}, plasma, root.path()).success);
+    const auto blue = OutputService::applyManaged(image, image.size(),
+        {{"screen", 1, image.rect(), image.rect()}}, "blue.png", {}, plasma, root.path());
+    QVERIFY(blue.success);
+    const auto setDate = [](const QString &path, const QString &date) {
+        QFile manifest(path);
+        if (!manifest.open(QIODevice::ReadOnly)) return false;
+        auto data = QJsonDocument::fromJson(manifest.readAll()).object();
+        manifest.close();
+        data.insert("createdAt", date);
+        const auto json = QJsonDocument(data).toJson();
+        return manifest.open(QIODevice::WriteOnly | QIODevice::Truncate) && manifest.write(json) == json.size();
+    };
+    QVERIFY(setDate(green.manifestPath, "2024-07-21T15:00:00.000Z"));
+    QVERIFY(setDate(blue.manifestPath, "2024-07-21T09:00:00.000Z"));
     SetLibraryDialog multiple(nullptr, root.path());
-    list = multiple.findChild<QListWidget *>("setList");
+    multiple.show();
+    list = multiple.findChild<WallpaperSetList *>("setList");
     selectAll = multiple.findChild<QCheckBox *>("selectAllSets");
     deleteSelected = multiple.findChild<QPushButton *>("deleteSelectedSets");
     rename = multiple.findChild<QPushButton *>("renameSet");
     exportSet = multiple.findChild<QPushButton *>("exportSet");
-    QCOMPARE(list->count(), 2);
-    list->item(0)->setCheckState(Qt::Checked);
+    QCOMPARE(list->topLevelItemCount(), 2);
+    auto *header = list->header();
+    const auto clickHeader = [header](int column) {
+        QTest::mouseClick(header->viewport(), Qt::LeftButton, Qt::NoModifier,
+            QPoint(header->sectionViewportPosition(column) + 8, header->height() / 2));
+    };
+    QCOMPARE(list->topLevelItem(0)->text(0), greenName);
+    clickHeader(WallpaperSetList::Name);
+    QCOMPARE(list->topLevelItem(0)->text(0), "blue.png");
+    QCOMPARE(list->currentItem()->text(0), greenName);
+    clickHeader(WallpaperSetList::DateAdded);
+    QCOMPARE(list->topLevelItem(0)->text(0), greenName);
+    clickHeader(WallpaperSetList::DateAdded);
+    QCOMPARE(list->topLevelItem(0)->text(0), "blue.png");
+    list->topLevelItem(0)->setCheckState(0, Qt::Checked);
     QCOMPARE(selectAll->checkState(), Qt::PartiallyChecked);
     QCOMPARE(deleteSelected->text(), "Delete selected (1)");
     selectAll->click();
-    QCOMPARE(list->item(0)->checkState(), Qt::Checked);
-    QCOMPARE(list->item(1)->checkState(), Qt::Checked);
+    QCOMPARE(list->topLevelItem(0)->checkState(0), Qt::Checked);
+    QCOMPARE(list->topLevelItem(1)->checkState(0), Qt::Checked);
     QCOMPARE(deleteSelected->text(), "Delete selected (2)");
     QVERIFY(!rename->isEnabled());
     QVERIFY(!exportSet->isEnabled());
     selectAll->click();
-    QCOMPARE(list->item(0)->checkState(), Qt::Unchecked);
-    QCOMPARE(list->item(1)->checkState(), Qt::Unchecked);
+    QCOMPARE(list->topLevelItem(0)->checkState(0), Qt::Unchecked);
+    QCOMPARE(list->topLevelItem(1)->checkState(0), Qt::Unchecked);
     QVERIFY(deleteSelected->isEnabled());
     QVERIFY(rename->isEnabled());
     QVERIFY(exportSet->isEnabled());
-    list->setCurrentRow(list->currentRow() == 0 ? 1 : 0);
+    list->setCurrentItem(list->topLevelItem(list->indexOfTopLevelItem(list->currentItem()) == 0 ? 1 : 0));
     QVERIFY(deleteSelected->isEnabled());
     QVERIFY(rename->isEnabled());
+
+    auto *splitter = multiple.findChild<QSplitter *>();
+    auto *longName = list->topLevelItem(1);
+    QCOMPARE(longName->text(0), greenName);
+    multiple.resize(1250, 580);
+    splitter->setSizes({850, 390});
+    QCoreApplication::processEvents();
+    const int wideHeight = list->visualItemRect(longName).height();
+    QVERIFY(wideHeight > 0);
+    splitter->setSizes({230, 1010});
+    QTRY_VERIFY(list->visualItemRect(longName).height() > wideHeight);
+    QCOMPARE(longName->text(0), greenName);
+    splitter->setSizes({850, 390});
+    QTRY_COMPARE(list->visualItemRect(longName).height(), wideHeight);
 }
 
 void SplitImageTest::physicalLayoutCompensatesForPixelDensity() {
