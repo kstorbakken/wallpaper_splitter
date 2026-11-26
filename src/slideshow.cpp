@@ -20,6 +20,7 @@
 namespace {
 const QString timerName = QStringLiteral("wallpaper-splitter-slideshow.timer");
 const QString serviceName = QStringLiteral("wallpaper-splitter-slideshow.service");
+const QStringList lockScreenModes{"off", "match-desktop", "separate-playlist"};
 
 OperationResult failure(const QString &message) {
     return OperationResult::failure(OperationError::FileSystem, message);
@@ -57,16 +58,53 @@ OperationResult systemctl(const QStringList &arguments) {
     return result;
 }
 
-bool validSettings(const SlideshowSettings &settings) {
-    if (settings.intervalMinutes < 1 || settings.intervalMinutes > 10080
-        || settings.setIds.size() > 10000) return false;
+bool validPlaylist(const QStringList &ids) {
+    if (ids.size() > 10000) return false;
     const QRegularExpression idPattern("^set-[a-f0-9]{32}$");
     QSet<QString> seen;
-    for (const auto &id : settings.setIds) {
+    for (const auto &id : ids) {
         if (!idPattern.match(id).hasMatch() || seen.contains(id)) return false;
         seen.insert(id);
     }
-    return !settings.enabled || !settings.setIds.isEmpty();
+    return true;
+}
+
+bool validSettings(const SlideshowSettings &settings) {
+    const int mode = static_cast<int>(settings.lockScreenMode);
+    return settings.intervalMinutes >= 1 && settings.intervalMinutes <= 10080
+        && mode >= 0 && mode < lockScreenModes.size()
+        && validPlaylist(settings.setIds) && validPlaylist(settings.lockScreenSetIds)
+        && (settings.lockScreenMode != LockScreenRotation::SeparatePlaylist || !settings.lockScreenSetIds.isEmpty())
+        && (!settings.enabled || settings.hasPlaylist());
+}
+
+template <typename Apply>
+OperationResult advancePlaylist(QStringList candidates, QString &lastSetId, bool shuffle, Apply apply) {
+    const auto last = candidates.indexOf(lastSetId);
+    if (shuffle) {
+        candidates.removeAll(lastSetId);
+        std::shuffle(candidates.begin(), candidates.end(), *QRandomGenerator::global());
+        if (last >= 0) candidates.append(lastSetId);
+    } else if (last >= 0) {
+        std::rotate(candidates.begin(), candidates.begin() + last + 1, candidates.end());
+    }
+
+    QStringList problems;
+    for (const auto &id : candidates) {
+        bool attempted = false;
+        const auto applied = apply(id, &attempted);
+        if (applied.success) {
+            lastSetId = id;
+            return applied;
+        }
+        // Only skip a candidate if it failed validation before an update was attempted.
+        if (attempted || applied.error == OperationError::Collision) return applied;
+        problems.append(applied.message);
+    }
+    problems.removeDuplicates();
+    QString message = QObject::tr("No usable slideshow sets match the connected monitors. The wallpaper was left unchanged.");
+    if (!problems.isEmpty()) message += '\n' + problems.join('\n');
+    return failure(message);
 }
 }
 
@@ -229,6 +267,14 @@ OperationResult Slideshow::load(SlideshowSettings *settings) const {
     settings->intervalMinutes = object.value("intervalMinutes").toInt();
     for (const auto &value : object.value("setIds").toArray()) settings->setIds.append(value.toString());
     settings->lastSetId = object.value("lastSetId").toString();
+    const auto mode = object.value("lockScreenMode");
+    const auto lockScreenIds = object.value("lockScreenSetIds");
+    const auto modeIndex = mode.isUndefined() ? 0 : lockScreenModes.indexOf(mode.toString());
+    if (modeIndex < 0 || (!lockScreenIds.isUndefined() && !lockScreenIds.isArray()))
+        return failure(QObject::tr("The lock screen rotation settings are invalid."));
+    settings->lockScreenMode = static_cast<LockScreenRotation>(modeIndex);
+    for (const auto &value : lockScreenIds.toArray()) settings->lockScreenSetIds.append(value.toString());
+    settings->lastLockScreenSetId = object.value("lastLockScreenSetId").toString();
     settings->lastAttempt = object.value("lastAttempt").toString();
     settings->lastError = object.value("lastError").toString();
     if (!validSettings(*settings))
@@ -240,11 +286,17 @@ OperationResult Slideshow::save(const SlideshowSettings &settings) const {
     const QJsonObject object{{"schemaVersion", 1}, {"enabled", settings.enabled},
         {"intervalMinutes", settings.intervalMinutes}, {"shuffle", settings.shuffle},
         {"setIds", QJsonArray::fromStringList(settings.setIds)}, {"lastSetId", settings.lastSetId},
+        {"lockScreenMode", lockScreenModes.at(static_cast<int>(settings.lockScreenMode))},
+        {"lockScreenSetIds", QJsonArray::fromStringList(settings.lockScreenSetIds)},
+        {"lastLockScreenSetId", settings.lastLockScreenSetId},
         {"lastAttempt", settings.lastAttempt}, {"lastError", settings.lastError}};
     return writeFile(fileName, QJsonDocument(object).toJson());
 }
 
-OperationResult Slideshow::configure(const SlideshowSettings &settings, SlideshowScheduler &scheduler) const {
+OperationResult Slideshow::configure(const SlideshowSettings &settings, SlideshowScheduler &scheduler,
+                                    const QList<MonitorInfo> &monitors) const {
+    if (settings.lockScreenMode == LockScreenRotation::SeparatePlaylist && settings.lockScreenSetIds.isEmpty())
+        return failure(QObject::tr("Choose at least one set for the separate lock screen playlist."));
     if (!validSettings(settings))
         return failure(QObject::tr("Choose at least one set for automatic rotation and an interval from 1 to 10080 minutes."));
     if (!QDir().mkpath(QFileInfo(fileName).absolutePath()))
@@ -257,6 +309,7 @@ OperationResult Slideshow::configure(const SlideshowSettings &settings, Slidesho
     if (!result.success) return result;
     auto updated = settings;
     updated.lastSetId = previous.lastSetId;
+    updated.lastLockScreenSetId = previous.lastLockScreenSetId;
     updated.lastAttempt = previous.lastAttempt;
     updated.lastError.clear();
     // Persist the disabled state first, so even a failed scheduler command cannot
@@ -264,11 +317,28 @@ OperationResult Slideshow::configure(const SlideshowSettings &settings, Slidesho
     updated.enabled = false;
     result = save(updated);
     if (!result.success) return result;
+
+    // The greeter chooses its wallpaper plugin when it starts. Set it up before
+    // the first scheduled tick so a lock session can already receive that tick.
+    if (settings.enabled && !monitors.isEmpty() && settings.lockScreenMode != LockScreenRotation::Off
+        && !SetLibrary::hasLiveLockScreen()) {
+        const bool matchDesktop = settings.lockScreenMode == LockScreenRotation::MatchDesktop;
+        auto candidates = matchDesktop ? updated.setIds : updated.lockScreenSetIds;
+        const auto current = matchDesktop ? updated.lastSetId : updated.lastLockScreenSetId;
+        if (candidates.removeOne(current)) candidates.prepend(current);
+        QString primedId;
+        const auto primed = advancePlaylist(candidates, primedId, false, [&](const QString &id, bool *attempted) {
+            return library.applyLockScreen(id, monitors, attempted);
+        });
+        if (!primed.success) updated.lastError = QObject::tr("Lock screen setup: %1").arg(primed.message);
+    }
     // Enabling already writes both units, reloads the manager, and restarts the
     // timer. A preliminary disable can fail on stale units and prevent repair.
     result = settings.enabled ? scheduler.enable(settings.intervalMinutes) : scheduler.disable();
     if (!result.success) {
+        const auto setupError = updated.lastError;
         updated.lastError = QObject::tr("Automatic rotation is disabled. %1").arg(result.message);
+        if (!setupError.isEmpty()) updated.lastError += '\n' + setupError;
         // Only an enable attempt needs rollback. Repeating a failed disable
         // immediately produces the same error and cannot improve the outcome.
         if (settings.enabled) {
@@ -293,11 +363,17 @@ OperationResult Slideshow::removeSets(const QStringList &setIds, SlideshowSchedu
     SlideshowSettings settings;
     auto result = load(&settings);
     if (!result.success) return result;
-    const auto previous = settings.setIds;
-    for (const auto &id : setIds) settings.setIds.removeAll(id);
-    if (settings.setIds == previous) return OperationResult::ok();
+    qsizetype removed = 0;
+    for (const auto &id : setIds) {
+        removed += settings.setIds.removeAll(id);
+        removed += settings.lockScreenSetIds.removeAll(id);
+    }
+    if (removed == 0) return OperationResult::ok();
     if (setIds.contains(settings.lastSetId)) settings.lastSetId.clear();
-    const bool empty = settings.setIds.isEmpty();
+    if (setIds.contains(settings.lastLockScreenSetId)) settings.lastLockScreenSetId.clear();
+    if (settings.lockScreenMode == LockScreenRotation::SeparatePlaylist && settings.lockScreenSetIds.isEmpty())
+        settings.lockScreenMode = LockScreenRotation::Off;
+    const bool empty = !settings.hasPlaylist();
     if (empty) settings.enabled = false;
     // Save the disabled state before stopping the timer, just as configure does.
     result = save(settings);
@@ -305,7 +381,7 @@ OperationResult Slideshow::removeSets(const QStringList &setIds, SlideshowSchedu
     return empty ? scheduler.disable() : result;
 }
 
-OperationResult Slideshow::next(const QList<QRect> &layout, PlasmaApplicator &applicator,
+OperationResult Slideshow::next(const QList<MonitorInfo> &monitors, PlasmaApplicator &applicator,
                                bool automatic) const {
     if (!QDir().mkpath(QFileInfo(fileName).absolutePath()))
         return failure(QObject::tr("Could not create the slideshow settings directory."));
@@ -317,41 +393,34 @@ OperationResult Slideshow::next(const QList<QRect> &layout, PlasmaApplicator &ap
     if (!result.success) return result;
     if (automatic && !settings.enabled) return OperationResult::ok();
 
-    QStringList candidates = settings.setIds;
-    const auto last = candidates.indexOf(settings.lastSetId);
-    if (settings.shuffle) {
-        candidates.removeAll(settings.lastSetId);
-        std::shuffle(candidates.begin(), candidates.end(), *QRandomGenerator::global());
-        // Only repeat the last set when no other usable set remains.
-        if (last >= 0) candidates.append(settings.lastSetId);
-    } else if (last >= 0) {
-        std::rotate(candidates.begin(), candidates.begin() + last + 1, candidates.end());
+    const bool separate = settings.lockScreenMode == LockScreenRotation::SeparatePlaylist;
+    auto desktop = OperationResult::ok();
+    if (!separate || !settings.setIds.isEmpty()) {
+        QList<QRect> layout;
+        for (const auto &monitor : monitors) layout.append(monitor.desktopGeometry);
+        desktop = advancePlaylist(settings.setIds, settings.lastSetId, settings.shuffle,
+            [&](const QString &id, bool *attempted) { return library.reapply(id, layout, applicator, attempted); });
     }
-    result = failure(QObject::tr("No usable slideshow sets match the connected monitors. The wallpaper was left unchanged."));
-    QStringList problems;
-    for (const auto &id : candidates) {
-        bool attempted = false;
-        const auto applied = library.reapply(id, layout, applicator, &attempted);
-        if (applied.success) {
-            settings.lastSetId = id;
-            result = applied;
-            break;
-        }
-        // Skip invalid files/layouts, but stop after any actual Plasma operation
-        // (including a manifest write failure) or concurrent library operation.
-        if (attempted || applied.error == OperationError::Collision) {
-            result = applied;
-            break;
-        }
-        problems.append(applied.message);
+
+    result = desktop;
+    if (settings.lockScreenMode == LockScreenRotation::MatchDesktop && desktop.success) {
+        const auto lockScreen = library.applyLockScreen(settings.lastSetId, monitors);
+        if (!lockScreen.success)
+            result = OperationResult::failure(lockScreen.error,
+                QObject::tr("The desktop advanced, but the lock screen could not be updated. %1")
+                    .arg(lockScreen.message));
+    } else if (separate) {
+        const auto lockScreen = advancePlaylist(settings.lockScreenSetIds, settings.lastLockScreenSetId, settings.shuffle,
+            [&](const QString &id, bool *attempted) { return library.applyLockScreen(id, monitors, attempted); });
+        QStringList errors;
+        if (!desktop.success) errors.append(QObject::tr("Desktop: %1").arg(desktop.message));
+        if (!lockScreen.success) errors.append(QObject::tr("Lock screen: %1").arg(lockScreen.message));
+        result = errors.isEmpty() ? OperationResult::ok() : OperationResult::failure(
+            desktop.success ? lockScreen.error : desktop.error, errors.join('\n'));
     }
+
     settings.lastAttempt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     settings.lastError = result.success ? QString() : result.message;
-    if (!result.success && !problems.isEmpty()) {
-        problems.removeDuplicates();
-        settings.lastError += '\n' + problems.join('\n');
-        result.message = settings.lastError;
-    }
     const auto saved = save(settings);
     return saved.success ? result : saved;
 }

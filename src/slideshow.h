@@ -1,8 +1,11 @@
 #ifndef WALLPAPER_SPLITTER_SLIDESHOW_H
 #define WALLPAPER_SPLITTER_SLIDESHOW_H
 
+#include "monitorlayout.h"
 #include "setlibrary.h"
 #include <functional>
+
+enum class LockScreenRotation { Off, MatchDesktop, SeparatePlaylist };
 
 struct SlideshowSettings {
     bool enabled{false};
@@ -10,8 +13,16 @@ struct SlideshowSettings {
     bool shuffle{false};
     QStringList setIds;
     QString lastSetId;
+    LockScreenRotation lockScreenMode{LockScreenRotation::Off};
+    QStringList lockScreenSetIds;
+    QString lastLockScreenSetId;
     QString lastAttempt;
     QString lastError;
+
+    bool hasPlaylist() const {
+        return !setIds.isEmpty() || (lockScreenMode == LockScreenRotation::SeparatePlaylist
+                                    && !lockScreenSetIds.isEmpty());
+    }
 };
 
 class SlideshowScheduler {
@@ -46,9 +57,10 @@ public:
     OperationResult load(SlideshowSettings *settings) const;
     // Saves the playlist and updates its timer together. A scheduling failure
     // leaves automatic rotation disabled, with the playlist available for retry.
-    OperationResult configure(const SlideshowSettings &settings, SlideshowScheduler &scheduler) const;
+    OperationResult configure(const SlideshowSettings &settings, SlideshowScheduler &scheduler,
+                              const QList<MonitorInfo> &monitors = {}) const;
     OperationResult removeSets(const QStringList &setIds, SlideshowScheduler &scheduler) const;
-    OperationResult next(const QList<QRect> &layout, PlasmaApplicator &applicator,
+    OperationResult next(const QList<MonitorInfo> &monitors, PlasmaApplicator &applicator,
                          bool automatic = false) const;
 private:
     QString fileName;

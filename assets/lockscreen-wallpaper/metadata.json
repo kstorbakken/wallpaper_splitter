@@ -1,0 +1,10 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Id": "io.github.kstorbakken.wallpaper_splitter.lockscreen",
+        "Name": "Wallpaper Splitter",
+        "Description": "Display a Wallpaper Splitter set across connected displays",
+        "Icon": "preferences-desktop-wallpaper",
+        "License": "GPL-3.0-only"
+    }
+}

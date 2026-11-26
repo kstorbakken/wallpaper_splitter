@@ -7,15 +7,17 @@ Wallpaper Splitter fits an image to your screen layout, cuts it into per-monitor
 crops, and applies them together. You can also export the crops for your own use.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="Wallpaper Splitter editor showing one landscape across three monitor outlines, with Open, Library, Settings, Preview, Export, and Apply controls." width="900">
+  <img src="assets/screenshot.png" alt="Wallpaper Splitter editor showing a rocky coastline across three monitor outlines, with the Apply dropdown in the footer." width="601">
 </p>
 
 ## What you can do
 
 - Fit a continuous panorama, stretch to fill, or adjust the image by hand.
+- Span a wallpaper across your monitors on the desktop or the lock screen.
 - Align displays with different pixel densities, heights, and bezel gaps.
 - Preview on the desktop with automatic restoration of your previous wallpaper.
-- Save wallpaper sets in a library and rotate them while the app is closed.
+- Save wallpaper sets in a library and rotate them on the desktop and lock screen
+  while the app is closed.
 - Split a folder of images, or export and apply from the command line.
 
 Supports still images, including JPEG, PNG, and WebP.
@@ -44,8 +46,8 @@ AppImage setup, and updates. To build from source, use the
    it manually; hold **Shift** to preserve its aspect ratio.
 3. Click **Preview** to try it on the desktop. The previous wallpaper returns
    when the countdown ends or you click **End Preview**.
-4. Click **Apply** to save a library set and use it on the current Plasma activity,
-   or **Export** to save crop files in a folder you choose.
+4. Open **Apply** and choose **Apply to Desktop**, **Apply to Lock Screen**, or
+   **Save to Library**. Click **Export** to save crop files in a folder you choose.
 
 Open **Library → Slideshow…** to rotate saved sets automatically. For displays with
 different pixel densities or physical gaps, start with **Settings → Monitors**.

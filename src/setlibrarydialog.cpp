@@ -1,25 +1,80 @@
 #include "setlibrarydialog.h"
+
+#include "monitorlayout.h"
 #include "appsettings.h"
 #include "slideshowdialog.h"
+#include "wallpapersetlist.h"
+#include <QBitmap>
 #include <QCheckBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QGuiApplication>
+#include <QHeaderView>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
-#include <QListWidget>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegion>
 #include <QStyle>
+#include <QStyledItemDelegate>
+#include <QStyleOptionViewItem>
 #include <QScreen>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QSet>
+#include <QTextLayout>
 #include <QVBoxLayout>
 #include <algorithm>
+
+namespace {
+class LibraryNameDelegate final : public QStyledItemDelegate {
+public:
+    explicit LibraryNameDelegate(WallpaperSetList *list) : QStyledItemDelegate(list), list(list) {}
+
+private:
+    void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override {
+        QStyledItemDelegate::initStyleOption(option, index);
+        option->decorationPosition = QStyleOptionViewItem::Top;
+        option->decorationAlignment = Qt::AlignLeading | Qt::AlignTop;
+        option->displayAlignment = Qt::AlignLeading | Qt::AlignTop;
+        option->textElideMode = Qt::ElideNone;
+
+        // Qt also asks for a size hint with no cell rect, so use the column width for wrapping.
+        auto cell = *option;
+        cell.rect.setWidth(list->columnWidth(WallpaperSetList::Name));
+        const auto *style = list->style();
+        const auto textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &cell, list);
+        const int margin = style->pixelMetric(QStyle::PM_FocusFrameHMargin, &cell, list) + 1;
+        const int width = std::max(1, textRect.width() - 2 * margin);
+        if (option->fontMetrics.horizontalAdvance(option->text) <= width) return;
+
+        QTextLayout layout(option->text, option->font, list);
+        QTextOption wrapping;
+        wrapping.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        layout.setTextOption(wrapping);
+        layout.beginLayout();
+        QStringList lines;
+        for (auto line = layout.createLine(); line.isValid(); line = layout.createLine()) {
+            line.setLineWidth(width);
+            lines.append(option->text.mid(line.textStart(), line.textLength()));
+        }
+        layout.endLayout();
+        option->text = lines.join(QChar::LineSeparator);
+    }
+
+    const WallpaperSetList *list;
+};
+
+QIcon libraryThumbnail(const WallpaperSet &set, const QSize &size) {
+    const auto preview = QPixmap::fromImage(SetLibrary::preview(set, size));
+    const QRect content = QRegion(preview.mask()).boundingRect();
+    if (content.isEmpty()) return QIcon(preview);
+    return QIcon(preview.copy(content.adjusted(0, -4, 0, 4).intersected(preview.rect())));
+}
+}
 
 SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
     : QDialog(parent), library(root) {
@@ -46,10 +101,16 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
     });
     layout->addLayout(selectionControls);
     auto *splitter = new QSplitter(this);
-    list = new QListWidget(splitter);
+    list = new WallpaperSetList(splitter);
     list->setObjectName("setList");
     list->setIconSize(QSize(120, 70));
     list->setMinimumWidth(230);
+    list->setUniformRowHeights(false);
+    list->setItemDelegateForColumn(WallpaperSetList::Name, new LibraryNameDelegate(list));
+    connect(list->header(), &QHeaderView::sectionResized, list, [this](int column) {
+        if (column == WallpaperSetList::Name) list->doItemsLayout();
+    }, Qt::QueuedConnection);
+    list->sortBy(WallpaperSetList::DateAdded, Qt::DescendingOrder);
     auto *panel = new QWidget(splitter);
     auto *panelLayout = new QVBoxLayout(panel);
     previewLabel = new QLabel(panel);
@@ -64,6 +125,10 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     applyButton = buttons->addButton(tr("Reapply"), QDialogButtonBox::ActionRole);
     applyButton->setObjectName("reapplySet");
+    lockScreenButton = buttons->addButton(tr("Set as Lock Screen"), QDialogButtonBox::ActionRole);
+    lockScreenButton->setObjectName("applyLockScreen");
+    lockScreenButton->setToolTip(tr("Apply this set across all connected lock screen displays."));
+    lockScreenButton->setAutoDefault(false);
     renameButton = buttons->addButton(tr("Rename"), QDialogButtonBox::ActionRole);
     renameButton->setObjectName("renameSet");
     renameButton->setIcon(QIcon::fromTheme(QStringLiteral("edit-rename"),
@@ -78,13 +143,13 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
                                           style()->standardIcon(QStyle::SP_DialogSaveButton)));
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(list, &QListWidget::currentRowChanged, this, [this] { select(); });
-    connect(list, &QListWidget::itemChanged, this, [this] { updateBulkControls(); });
+    connect(list, &WallpaperSetList::currentItemChanged, this, [this] { select(); });
+    connect(list, &WallpaperSetList::itemChanged, this, [this] { updateBulkControls(); });
     connect(selectAllCheckBox, &QCheckBox::clicked, this, [this](bool checked) {
         const auto state = checked ? Qt::Checked : Qt::Unchecked;
         const QSignalBlocker blocker(list);
-        for (int i = 0; i < list->count(); ++i)
-            list->item(i)->setCheckState(state);
+        for (int i = 0; i < list->topLevelItemCount(); ++i)
+            list->topLevelItem(i)->setCheckState(WallpaperSetList::Name, state);
         updateBulkControls();
     });
     connect(exportButton, &QPushButton::clicked, this, [this] {
@@ -135,14 +200,11 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
         report(result);
         if (result.success) status->setText(tr("Set applied to the current Plasma activity."));
     });
+    connect(lockScreenButton, &QPushButton::clicked, this, &SetLibraryDialog::applyLockScreen);
     connect(renameButton, &QPushButton::clicked, this, [this] {
-        const QStringList ids = actionIds();
-        if (ids.size() != 1) return;
-        const auto found = std::find_if(entries.cbegin(), entries.cend(), [&ids](const auto &set) {
-            return set.id == ids.first();
-        });
-        if (found == entries.cend()) return;
-        const auto set = *found;
+        const auto *selected = actionSet(actionIds());
+        if (!selected) return;
+        const auto set = *selected;
         bool accepted = false;
         const QString name = QInputDialog::getText(this, tr("Rename set"), tr("Name:"),
                                                    QLineEdit::Normal, set.name, &accepted);
@@ -181,7 +243,7 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
         const auto updated = Slideshow().removeSets(deletedIds, scheduler);
         if (!updated.success)
             QMessageBox::warning(this, tr("Could not update slideshow"),
-                tr("The deleted sets could not be removed from the slideshow playlist. %1").arg(updated.message));
+                tr("The deleted sets could not be removed from the slideshow playlists. %1").arg(updated.message));
         refresh();
         if (failures.isEmpty()) {
             status->setText(tr("Deleted %n wallpaper set(s).", nullptr, deletedIds.size()));
@@ -198,43 +260,36 @@ SetLibraryDialog::SetLibraryDialog(QWidget *parent, const QString &root)
 }
 
 void SetLibraryDialog::refresh(const QString &selectedId) {
-    QString currentId = selectedId;
-    if (currentId.isEmpty() && list->currentItem())
-        currentId = list->currentItem()->data(Qt::UserRole).toString();
+    const QString currentId = selectedId.isEmpty() ? WallpaperSetList::setId(list->currentItem()) : selectedId;
     const QStringList checkedList = checkedIds();
     const QSet<QString> checked(checkedList.cbegin(), checkedList.cend());
     const QSignalBlocker blocker(list);
     list->clear();
     entries = library.sets();
-    int row = 0;
-    for (int i = 0; i < entries.size(); ++i) {
-        const auto &set = entries[i];
-        auto *item = new QListWidgetItem(QIcon(QPixmap::fromImage(SetLibrary::preview(set, QSize(120, 70)))),
-                                        set.name, list);
-        item->setData(Qt::UserRole, set.id);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(checked.contains(set.id) ? Qt::Checked : Qt::Unchecked);
-        item->setToolTip(set.problem.isEmpty() ? set.name : set.problem);
-        if (set.id == currentId) row = i;
+    QTreeWidgetItem *selected = nullptr;
+    for (const auto &set : entries) {
+        auto *item = list->addSet(set, libraryThumbnail(set, list->iconSize()),
+                                  checked.contains(set.id) ? Qt::Checked : Qt::Unchecked);
+        if (set.id == currentId) selected = item;
     }
+    list->refreshSort();
     status->setText(entries.isEmpty()
-        ? tr("No wallpaper sets yet. Open an image and choose Apply to add your first set.")
+        ? tr("No wallpaper sets yet. Open an image and choose Save to Library or Apply.")
         : tr("%n saved set(s). Reapply uses the current Plasma activity.", nullptr, entries.size()));
-    if (!entries.isEmpty()) list->setCurrentRow(row);
+    if (!entries.isEmpty()) list->setCurrentItem(selected ? selected : list->topLevelItem(0));
     select();
     updateBulkControls();
 }
 
 void SetLibraryDialog::select() {
-    const int row = list->currentRow();
-    const bool selected = row >= 0 && row < entries.size();
+    const auto *selected = actionSet({WallpaperSetList::setId(list->currentItem())});
     details->clear();
     previewLabel->clear();
     if (!selected) {
         updateBulkControls();
         return;
     }
-    const auto &set = entries[row];
+    const auto &set = *selected;
     previewLabel->setPixmap(QPixmap::fromImage(SetLibrary::preview(set, QSize(480, 200))));
     const auto &m = set.manifest;
     const auto date = QDateTime::fromString(m.value("createdAt").toString(), Qt::ISODateWithMs);
@@ -256,37 +311,46 @@ void SetLibraryDialog::select() {
 }
 
 QStringList SetLibraryDialog::checkedIds() const {
-    QStringList ids;
-    for (int i = 0; i < list->count(); ++i)
-        if (list->item(i)->checkState() == Qt::Checked)
-            ids.append(list->item(i)->data(Qt::UserRole).toString());
-    return ids;
+    return list->setIds(true);
 }
 
 QStringList SetLibraryDialog::actionIds() const {
     QStringList ids = checkedIds();
     if (ids.isEmpty() && list->currentItem())
-        ids.append(list->currentItem()->data(Qt::UserRole).toString());
+        ids.append(WallpaperSetList::setId(list->currentItem()));
     return ids;
+}
+
+const WallpaperSet *SetLibraryDialog::actionSet(const QStringList &ids) const {
+    if (ids.size() != 1) return nullptr;
+    const auto found = std::find_if(entries.cbegin(), entries.cend(), [&ids](const auto &set) {
+        return set.id == ids.first();
+    });
+    return found == entries.cend() ? nullptr : &*found;
+}
+
+void SetLibraryDialog::applyLockScreen() {
+    const auto *selected = actionSet(actionIds());
+    if (!selected || !selected->problem.isEmpty()) return;
+    const auto result = library.applyLockScreen(selected->id, MonitorLayout::connectedMonitors());
+    report(result);
+    if (result.success) status->setText(tr("This set will span your displays the next time you lock your screen."));
 }
 
 void SetLibraryDialog::updateBulkControls() {
     const int checked = checkedIds().size();
     const QStringList ids = actionIds();
     const QSignalBlocker blocker(selectAllCheckBox);
-    selectAllCheckBox->setEnabled(list->count() > 0);
+    selectAllCheckBox->setEnabled(list->topLevelItemCount() > 0);
     selectAllCheckBox->setCheckState(checked == 0 ? Qt::Unchecked
-                                     : checked == list->count() ? Qt::Checked
+                                     : checked == list->topLevelItemCount() ? Qt::Checked
                                      : Qt::PartiallyChecked);
-    const bool single = ids.size() == 1;
-    const auto found = single
-        ? std::find_if(entries.cbegin(), entries.cend(), [&ids](const auto &set) {
-              return set.id == ids.first();
-          })
-        : entries.cend();
-    applyButton->setEnabled(single && found != entries.cend() && found->problem.isEmpty());
-    exportButton->setEnabled(single && found != entries.cend() && found->problem.isEmpty());
-    renameButton->setEnabled(single);
+    const auto *set = actionSet(ids);
+    const bool usable = set && set->problem.isEmpty();
+    applyButton->setEnabled(usable);
+    lockScreenButton->setEnabled(usable);
+    exportButton->setEnabled(usable);
+    renameButton->setEnabled(set != nullptr);
     deleteButton->setEnabled(!ids.isEmpty());
     deleteButton->setText(checked > 0
         ? tr("Delete selected (%1)").arg(checked)

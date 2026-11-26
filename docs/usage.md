@@ -7,8 +7,11 @@
 
 1. Click **Open** to select an image, or drop one into the window.
 2. Adjust the image and monitor overlay using the controls below.
-3. Click **Export** to save crop files, or **Apply** to save a library set and use
-   it on the current Plasma activity.
+3. Open **Apply** to save your current crops as a library set.
+   - **Apply to Desktop** uses the set on the current Plasma activity.
+   - **Apply to Lock Screen** spans the set across your displays the next time you lock the session.
+   - **Save to Library** saves the set without changing your wallpaper and keeps the editor open.
+4. Click **Export** to save crop files in a folder you choose.
 
 | Action | Control |
 | --- | --- |
@@ -68,8 +71,8 @@ preview, or when you close the preview dialog. Change **Preview duration** in
 Preview uses temporary crops and
 does not add a set to the library or write to your export folder. Temporary files
 are removed after Plasma confirms restoration; if restoration fails, the dialog
-keeps them and offers another attempt. The application's slideshow cannot switch
-wallpapers during a preview. Other activities' wallpapers are left as they were.
+keeps them and offers another attempt. Desktop slideshow rotation pauses during
+a preview. Other activities' wallpapers are left as they were.
 
 ## Export settings
 
@@ -87,30 +90,39 @@ opaque sources, and always uses PNG when transparency is present. The source ima
 is never modified.
 
 Uncheck **Close the app after successfully applying a wallpaper set** to keep
-the window open for further adjustments after Apply. This preference is remembered;
-closing after Apply is enabled by default.
+the window open after applying a desktop or lock screen wallpaper from the editor.
+Closing after applying is enabled by default.
 
 ## Library folder
 
 Set **Library folder** in <kbd>Settings → General</kbd> to choose a different
-location for managed sets. Apply, the Library, batch saves, and slideshow rotation
-all use that location. Existing sets stay in their original folder; switch back
-to access them. If you switch to another library, choose its sets in the slideshow
-playlist before resuming rotation. **Restore Defaults** returns to the standard
-library folder and resets the remembered batch choices and preview duration.
+location for managed sets. The Apply menu, the Library, batch saves, and
+slideshow rotation all use that location. Existing sets stay in their original
+folder. Switch back to access them. If you switch to another library, choose its
+sets in the slideshow playlist before resuming rotation. **Restore Defaults**
+returns to the standard library folder and resets the remembered batch choices
+and preview duration.
 
 ## Saved wallpaper sets
 
-Use <kbd>Library</kbd> to browse saved sets, with a preview, source image path,
+Use <kbd>Library</kbd> to browse saved sets. Click **Name** or **Date Added** to
+sort the list. Select a set to see its preview, source image path,
 creation time, monitor layout, crop mappings, and generated file paths. Reapply
 requires the saved monitor positions and resolutions to match the current layout;
 the original source image is not needed. Export saves a set's existing crops using
 the configured export folder, filename template, and collision handling, without
 reopening or recropping the source. Renaming changes the library label.
 
+To span the Plasma lock screen, select a set and click **Set as Lock Screen**.
+The set must match your current display layout. The app installs its bundled
+wallpaper plugin for your account on first use. The next time you lock the
+session, each display shows its matching crop. You can switch wallpaper types
+in Plasma's **Screen Locking → Configure Appearance** settings.
+
 Deletion removes only managed files and is blocked while Plasma references a set
-on any activity, or when those references cannot be checked. Switch those activities
-to another wallpaper before deleting. Exports and source images are kept.
+on any activity or on the lock screen, or when those references cannot be checked.
+Replace the wallpaper wherever the set is used before deleting. Exports and source
+images are kept.
 
 To rotate saved sets automatically, see the [slideshow guide](slideshow.md). For
 different pixel densities, height offsets, or bezel gaps, see
@@ -121,8 +133,8 @@ different pixel densities, height offsets, or bezel gaps, see
 Preferences follow the XDG base-directory convention and are stored in
 `~/.config/wallpaper-splitter/settings.conf`. Existing preferences from older
 versions are migrated automatically. Managed wallpaper sets created by
-<kbd>Apply</kbd> or a library batch are stored in `~/.local/share/wallpaper-splitter/sets`
-by default, or in your configured library folder.
+the **Apply** menu or a library batch are stored in
+`~/.local/share/wallpaper-splitter/sets` by default, or in your configured library folder.
 
 Exports belong to you. Applied crops and their JSON manifest are kept in the
 library so Plasma can keep referencing them after the app closes. Applying a set

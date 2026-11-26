@@ -60,12 +60,6 @@ editor with an image loaded, readable monitor outlines, and all footer controls
 visible. Use wallpaper artwork you have permission to redistribute and avoid
 personal paths or other private information.
 
-The current image is a capture of the application’s Qt widgets using the
-offscreen platform, Fusion style, a dark color scheme, an example three-monitor
-layout, and an original illustrated landscape. It shows the editor; it does not
-demonstrate a live Plasma wallpaper application. A capture from a Plasma Wayland
-session can replace it at the same path.
-
 ## Arch Linux devcontainer
 
 The included `.devcontainer/` definition uses `archlinux:base-devel` with the

@@ -2,7 +2,7 @@
 #define WALLPAPER_SPLITTER_SETLIBRARYDIALOG_H
 #include <QDialog>
 #include "setlibrary.h"
-class QListWidget;
+class WallpaperSetList;
 class QLabel;
 class QPlainTextEdit;
 class QPushButton;
@@ -14,20 +14,23 @@ public:
 private:
     SetLibrary library;
     QList<WallpaperSet> entries;
-    QListWidget *list;
+    WallpaperSetList *list;
     QLabel *previewLabel;
     QLabel *status;
     QPlainTextEdit *details;
     QCheckBox *selectAllCheckBox;
     QPushButton *applyButton;
+    QPushButton *lockScreenButton;
     QPushButton *exportButton;
     QPushButton *renameButton;
     QPushButton *deleteButton;
     void refresh(const QString &selectedId = {});
     void select();
     void updateBulkControls();
+    void applyLockScreen();
     QStringList checkedIds() const;
     QStringList actionIds() const;
+    const WallpaperSet *actionSet(const QStringList &ids) const;
     void report(const OperationResult &result);
 };
 #endif

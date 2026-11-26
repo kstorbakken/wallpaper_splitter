@@ -4,8 +4,9 @@
 #include "slideshow.h"
 #include <QDialog>
 class QCheckBox;
+class QComboBox;
 class QLabel;
-class QListWidget;
+class WallpaperSetList;
 class QPushButton;
 class QSpinBox;
 
@@ -18,12 +19,16 @@ private:
     Slideshow slideshow;
     SystemdSlideshowScheduler systemScheduler;
     SlideshowScheduler *scheduler;
-    QListWidget *list;
+    WallpaperSetList *list;
+    WallpaperSetList *lockScreenList;
+    QComboBox *lockScreenMode;
     QCheckBox *enabled;
     QCheckBox *shuffle;
     QSpinBox *interval;
     QLabel *status;
     QPushButton *nextButton;
+    QStringList desktopOrder;
+    QStringList lockScreenOrder;
     bool dirty{false};
     bool save();
     void updateStatus();

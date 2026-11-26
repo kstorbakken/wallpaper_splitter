@@ -1,6 +1,9 @@
 #include "setlibrary.h"
+#include "monitorlayout.h"
 #include "wallpaperpreview.h"
 
+#include <KConfig>
+#include <KConfigGroup>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -13,11 +16,16 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
 #include <algorithm>
 
 namespace {
+const auto lockScreenConfigName = QStringLiteral("kscreenlockerrc");
+const auto imageWallpaperPlugin = QStringLiteral("org.kde.image");
+const auto splitWallpaperPlugin = QStringLiteral("io.github.kstorbakken.wallpaper_splitter.lockscreen");
+
 OperationResult failure(const QString &message) {
     return OperationResult::failure(OperationError::FileSystem, message);
 }
@@ -31,6 +39,40 @@ OperationResult save(const WallpaperSet &set) {
     const auto data = QJsonDocument(set.manifest).toJson();
     if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
         return failure(QObject::tr("Could not save the set: %1").arg(file.errorString()));
+    return OperationResult::ok();
+}
+
+OperationResult validateLayout(const QList<ScreenCrop> &screens, QList<QRect> remaining) {
+    for (const auto &screen : screens) {
+        if (!remaining.removeOne(screen.desktopGeometry))
+            return OperationResult::failure(OperationError::ImageLayout,
+                QObject::tr("This set does not match the current monitor layout. Restore its layout before applying it."));
+    }
+    if (!remaining.isEmpty())
+        return OperationResult::failure(OperationError::ImageLayout,
+            QObject::tr("This set does not cover every connected monitor."));
+    return OperationResult::ok();
+}
+
+OperationResult installLockScreenWallpaper() {
+    const QDir data(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation));
+    const QDir package(data.absoluteFilePath("plasma/wallpapers/" + splitWallpaperPlugin));
+    const QStringList files{"contents/config/main.xml", "contents/ui/ScreenWallpaper.qml",
+                            "contents/ui/main.qml", "metadata.json"};
+    for (const auto &file : files) {
+        QFile resource(":/lockscreen-wallpaper/" + file);
+        if (!resource.open(QIODevice::ReadOnly))
+            return failure(QObject::tr("The bundled lock screen wallpaper could not be read."));
+        const QByteArray contents = resource.readAll();
+        const QString path = package.filePath(file);
+        QFile installed(path);
+        if (installed.open(QIODevice::ReadOnly) && installed.readAll() == contents) continue;
+        installed.close();
+        QSaveFile output(path);
+        if (!QDir().mkpath(QFileInfo(path).absolutePath()) || !output.open(QIODevice::WriteOnly)
+            || output.write(contents) != contents.size() || !output.commit())
+            return failure(QObject::tr("Could not install the Plasma wallpaper plugin at %1.").arg(path));
+    }
     return OperationResult::ok();
 }
 }
@@ -137,15 +179,8 @@ OperationResult SetLibrary::reapply(const QString &id, const QList<QRect> &layou
     auto result = load(id, &set);
     if (!result.success) return result;
     if (!set.problem.isEmpty()) return failure(set.problem);
-    auto remaining = layout;
-    for (const auto &screen : set.screens) {
-        if (!remaining.removeOne(screen.desktopGeometry))
-            return OperationResult::failure(OperationError::ImageLayout,
-                QObject::tr("This set does not match the current monitor layout. Restore its layout before applying it."));
-    }
-    if (!remaining.isEmpty())
-        return OperationResult::failure(OperationError::ImageLayout,
-                                        QObject::tr("This set does not cover every connected monitor."));
+    result = validateLayout(set.screens, layout);
+    if (!result.success) return result;
     // Decode every crop before touching Plasma, including images with valid headers but damaged data.
     for (const auto &path : set.paths)
         if (QImage(path).isNull()) return failure(QObject::tr("A generated image cannot be decoded."));
@@ -168,6 +203,81 @@ OperationResult SetLibrary::exportSet(const QString &id, const ExportOptions &op
     return OutputService::exportCrops(set.paths, set.screens, sourceName, options);
 }
 
+bool SetLibrary::hasLiveLockScreen() {
+    const KConfig config(lockScreenConfigName, KConfig::NoGlobals);
+    const auto greeter = config.group("Greeter");
+    if (greeter.readEntry("WallpaperPlugin", QString()) != splitWallpaperPlugin) return false;
+    const auto wallpaper = greeter.group("Wallpaper").group(splitWallpaperPlugin).group("General");
+    const QUrl url(wallpaper.readEntry("LiveState", QString()));
+    return url.isLocalFile() && QFileInfo(url.toLocalFile()).isFile();
+}
+
+OperationResult SetLibrary::applyLockScreen(const QString &id, const QList<MonitorInfo> &monitors,
+                                            bool *applicationAttempted) const {
+    if (applicationAttempted) *applicationAttempted = false;
+    if (!QFileInfo(root).isDir()) return failure(QObject::tr("The wallpaper library is unavailable."));
+    QLockFile lock(QDir(root).filePath(".operation.lock"));
+    lock.setStaleLockTime(0);
+    if (!lock.tryLock()) return OperationResult::failure(OperationError::Collision,
+        QObject::tr("A library operation is in progress. Try again shortly."));
+    WallpaperSet set;
+    auto result = load(id, &set);
+    if (!result.success) return result;
+    if (!set.problem.isEmpty()) return failure(set.problem);
+    QList<QRect> layout;
+    for (const auto &monitor : monitors) layout.append(monitor.desktopGeometry);
+    result = validateLayout(set.screens, layout);
+    if (!result.success) return result;
+
+    QJsonArray crops;
+    for (int i = 0; i < set.screens.size(); ++i) {
+        const auto &screen = set.screens.at(i);
+        const auto &path = set.paths.at(i);
+        if (QImage(path).size() != screen.cropRect.size())
+            return failure(QObject::tr("A generated image cannot be decoded or has changed dimensions."));
+        const QRect geometry = screen.desktopGeometry;
+        const QString &name = monitors.at(layout.indexOf(geometry)).name;
+        crops.append(QJsonObject{{"name", name}, {"x", geometry.x()}, {"y", geometry.y()},
+            {"width", geometry.width()}, {"height", geometry.height()},
+            {"url", QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded)}});
+    }
+
+    if (applicationAttempted) *applicationAttempted = true;
+    KConfig config(lockScreenConfigName, KConfig::NoGlobals);
+    auto greeter = config.group("Greeter");
+    auto wallpaper = greeter.group("Wallpaper").group(splitWallpaperPlugin).group("General");
+    const QString statePath = QDir(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation))
+        .filePath("wallpaper-splitter/lockscreen.ini");
+    const QString stateUrl = QUrl::fromLocalFile(statePath).toString(QUrl::FullyEncoded);
+    const bool configured = greeter.readEntry("WallpaperPlugin", QString()) == splitWallpaperPlugin
+        && wallpaper.readEntry("LiveState", QString()) == stateUrl;
+    if (!configured && (config.accessMode() != KConfig::ReadWrite
+        || greeter.isEntryImmutable("WallpaperPlugin") || wallpaper.isEntryImmutable("LiveState")))
+        return OperationResult::failure(OperationError::Plasma,
+            QObject::tr("The lock screen wallpaper settings are read-only."));
+    result = installLockScreenWallpaper();
+    if (!result.success) return result;
+
+    // Publish the whole layout atomically with a common fade start for every display.
+    const QJsonObject slide{{"crops", crops}, {"fadeAt", QDateTime::currentMSecsSinceEpoch() + 750}};
+    QSettings state(statePath, QSettings::IniFormat);
+    state.setValue("CurrentSlide", QString::fromUtf8(QJsonDocument(slide).toJson(QJsonDocument::Compact)));
+    state.sync();
+    if (state.status() != QSettings::NoError)
+        return failure(QObject::tr("Could not publish the current lock screen wallpaper."));
+
+    if (!configured) {
+        wallpaper.writeEntry("LiveState", stateUrl);
+        greeter.writeEntry("WallpaperPlugin", splitWallpaperPlugin);
+        if (!config.sync()) {
+            config.markAsClean();
+            return OperationResult::failure(OperationError::Plasma,
+                QObject::tr("Could not save the lock screen wallpaper settings."));
+        }
+    }
+    return OperationResult::ok(set.paths);
+}
+
 OperationResult SetLibrary::remove(const QString &id, PlasmaApplicator &applicator) const {
     QLockFile lock(QDir(root).filePath(".operation.lock"));
     lock.setStaleLockTime(0);
@@ -185,6 +295,31 @@ OperationResult SetLibrary::remove(const QString &id, PlasmaApplicator &applicat
             return failure(QObject::tr("The set directory contains unrecognized files; it was not deleted."));
     result = applicator.wallpaperReferences();
     if (!result.success) return result;
+    const KConfig lockScreenConfig(lockScreenConfigName, KConfig::NoGlobals);
+    if (lockScreenConfig.accessMode() == KConfig::NoAccess
+        && !QStandardPaths::locate(QStandardPaths::GenericConfigLocation, lockScreenConfigName).isEmpty())
+        return OperationResult::failure(OperationError::Plasma,
+            QObject::tr("Could not read the lock screen wallpaper settings."));
+    const auto greeter = lockScreenConfig.group("Greeter");
+    const QString plugin = greeter.readEntry("WallpaperPlugin", imageWallpaperPlugin);
+    const auto wallpaper = greeter.group("Wallpaper").group(plugin).group("General");
+    if (plugin == splitWallpaperPlugin) {
+        auto crops = QJsonDocument::fromJson(wallpaper.readEntry("ScreenCrops", QString()).toUtf8()).array();
+        const QUrl stateUrl(wallpaper.readEntry("LiveState", QString()));
+        if (!stateUrl.isEmpty()) {
+            const QString statePath = stateUrl.toLocalFile();
+            const QSettings state(statePath, QSettings::IniFormat);
+            const auto slide = QJsonDocument::fromJson(state.value("CurrentSlide").toString().toUtf8()).object();
+            crops = slide.value("crops").toArray();
+            if (statePath.isEmpty() || state.status() != QSettings::NoError || crops.isEmpty())
+                return OperationResult::failure(OperationError::Plasma,
+                    QObject::tr("Could not read the current lock screen wallpaper."));
+        }
+        for (const auto &crop : crops) result.paths.append(crop.toObject().value("url").toString());
+    } else {
+        result.paths.append(wallpaper.readPathEntry("Image", QString()));
+        result.paths.append(wallpaper.readPathEntry("SlidePaths", QStringList()));
+    }
     for (const auto &reference : result.paths) {
         if (reference.isEmpty()) continue;
         const QUrl url(reference);
@@ -197,7 +332,7 @@ OperationResult SetLibrary::remove(const QString &id, PlasmaApplicator &applicat
             || (QFileInfo(path).isDir() && (set.directory.startsWith(absolute + '/')
                 || prefix.startsWith(canonical + '/'))))
             return OperationResult::failure(OperationError::Plasma,
-                QObject::tr("Plasma still references this set. Apply another wallpaper on every activity using it, then try again."));
+                QObject::tr("Plasma still references this set. Replace it wherever it is used on the desktop or lock screen, then try again."));
     }
     for (const auto &path : set.paths)
         if (QFileInfo::exists(path) && !QFile::remove(path))

@@ -108,8 +108,9 @@ jobs:
           for entry in "${license[@]}"; do printf 'license = %s\n' "${entry}"; done >> build/pkgroot/.PKGINFO
           for entry in "${depends[@]}"; do printf 'depend = %s\n' "${entry}"; done >> build/pkgroot/.PKGINFO
           mkdir -p dist
-          bsdtar --create --file "dist/${pkgname}-${pkgver}-${pkgrel}-x86_64.pkg.tar.zst" \
-            --zstd --cd build/pkgroot .
+          package="dist/${pkgname}-${pkgver}-${pkgrel}-x86_64.pkg.tar.zst"
+          bsdtar --create --file "$package" --zstd --cd build/pkgroot .PKGINFO usr
+          test "$(pacman -Qp "$package")" = "${pkgname} ${pkgver}-${pkgrel}"
 
       - name: Stage AppImage and download packaging tools
         if: inputs.package && matrix.target == 'appimage'
